@@ -1,0 +1,364 @@
+{
+  "info": {
+    "_postman_id": "3daf5e44-d67b-4977-9e5e-923822bcdd8f",
+    "name": "AML API - Customer Pickup",
+    "description": "Collection untuk test sp_customer_pickup_create_json dan endpoint terkait",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Login (Run First)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Login successful', function() {",
+              "    pm.expect(jsonData.success).to.be.true;",
+              "});",
+              "",
+              "if (jsonData.data && jsonData.data.token) {",
+              "    pm.collectionVariables.set('token', jsonData.data.token);",
+              "    console.log('Token saved successfully!');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"customer1\",\n  \"password\": \"password123\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/auth/login",
+          "host": ["{{base_url}}"],
+          "path": ["auth", "login"]
+        },
+        "description": "Login untuk mendapatkan token. Token akan otomatis disimpan ke variable collection."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Create Pickup Request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Status code is 201', function() {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('Pickup created successfully', function() {",
+              "    pm.expect(jsonData.success).to.be.true;",
+              "    pm.expect(jsonData.data).to.have.property('id');",
+              "    pm.expect(jsonData.data).to.have.property('code');",
+              "});",
+              "",
+              "if (jsonData.data && jsonData.data.id) {",
+              "    pm.collectionVariables.set('pickup_id', jsonData.data.id);",
+              "    console.log('Pickup ID saved: ' + jsonData.data.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customer_name\": \"Ahmad Rizki\",\n  \"pickup_address\": \"Jl. Sudirman No. 123, Jakarta Pusat\",\n  \"item\": {\n    \"koli\": 2,\n    \"weight_kg\": 2.5,\n    \"description\": \"Laptop dan charger\"\n  },\n  \"schedule\": {\n    \"date\": \"17 Oktober 2025\",\n    \"time_range\": \"14:30\"\n  },\n  \"instructions\": \"Rumah cat hijau, sebelah warung\",\n  \"pic\": {\n    \"name\": \"Ahmad Rizki\",\n    \"phone\": \"081234567890\",\n    \"whatsapp\": true\n  },\n  \"destination\": {\n    \"city\": \"Jakarta\",\n    \"address\": \"Jl. Thamrin No. 456\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/customer/pickup",
+          "host": ["{{base_url}}"],
+          "path": ["customer", "pickup"]
+        },
+        "description": "Membuat pickup request baru. Memanggil sp_customer_pickup_create_json."
+      },
+      "response": [
+        {
+          "name": "Success Response",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Ahmad Rizki\",\n  \"pickup_address\": \"Jl. Sudirman No. 123, Jakarta Pusat\",\n  \"item\": {\n    \"koli\": 2,\n    \"weight_kg\": 2.5,\n    \"description\": \"Laptop dan charger\"\n  },\n  \"schedule\": {\n    \"date\": \"17 Oktober 2025\",\n    \"time_range\": \"14:30\"\n  },\n  \"instructions\": \"Rumah cat hijau, sebelah warung\",\n  \"pic\": {\n    \"name\": \"Ahmad Rizki\",\n    \"phone\": \"081234567890\",\n    \"whatsapp\": true\n  },\n  \"destination\": {\n    \"city\": \"Jakarta\",\n    \"address\": \"Jl. Thamrin No. 456\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/pickup",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "pickup"]
+            }
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"success\": true,\n  \"responseCode\": \"2010201\",\n  \"responseMessage\": \"Pickup request berhasil dibuat\",\n  \"data\": {\n    \"id\": \"1\",\n    \"code\": \"#PU-2025-000001\",\n    \"date\": \"17 Desember 2025, 14:30\",\n    \"status\": \"pending\"\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "3. Get Pickup History",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has pickups array', function() {",
+              "    pm.expect(jsonData.data).to.have.property('pickups');",
+              "    pm.expect(jsonData.data).to.have.property('pagination');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/customer/pickup/history?page=1&limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["customer", "pickup", "history"],
+          "query": [
+            {
+              "key": "status",
+              "value": "",
+              "description": "Filter: pending, in_progress, done, canceled",
+              "disabled": true
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "Mendapatkan history pickup. Memanggil sp_customer_pickup_history_json."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Get Pickup Detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has pickup data', function() {",
+              "    pm.expect(jsonData.data).to.have.property('id');",
+              "    pm.expect(jsonData.data).to.have.property('code');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/customer/pickup/1",
+          "host": ["{{base_url}}"],
+          "path": ["customer", "pickup", "1"]
+        },
+        "description": "Mendapatkan detail pickup berdasarkan ID. Memanggil sp_customer_pickup_detail_json."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Get Customer Dashboard",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has stats and recentOrders', function() {",
+              "    pm.expect(jsonData.data).to.have.property('stats');",
+              "    pm.expect(jsonData.data).to.have.property('recentOrders');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/customer/dashboard",
+          "host": ["{{base_url}}"],
+          "path": ["customer", "dashboard"]
+        },
+        "description": "Mendapatkan dashboard customer. Memanggil sp_customer_dashboard_json."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Get Customer Orders",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has orders and pagination', function() {",
+              "    pm.expect(jsonData.data).to.have.property('orders');",
+              "    pm.expect(jsonData.data).to.have.property('pagination');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/customer/orders?page=1&limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["customer", "orders"],
+          "query": [
+            {
+              "key": "status",
+              "value": "in_progress",
+              "description": "Filter: pending, in_progress, completed",
+              "disabled": true
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "Mendapatkan daftar orders customer. Memanggil sp_customer_orders_json."
+      },
+      "response": []
+    }
+  ]
+}
+
