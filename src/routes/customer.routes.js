@@ -81,6 +81,7 @@ router.get(
  * POST /api/customer/pickup
  * Membuat request pickup baru
  * SP: sp_customer_pickup_create_json(p_user_id, p_data_json)
+ * test update
  */
 router.post(
   '/pickup',
