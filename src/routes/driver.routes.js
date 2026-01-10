@@ -112,6 +112,30 @@ router.get(
 );
 
 /**
+ * GET /api/driver/pickup/:id
+ * Mendapatkan detail pickup berdasarkan ID
+ * SP: sp_driver_pickup_detail_json(p_user_id, p_pickup_id)
+ */
+router.get(
+  '/pickup/:id',
+  authRequired,
+  [param('id').isString().notEmpty()],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+
+    const data = await callJsonSP('sp_driver_pickup_detail_json', [userId, id]);
+    if (!data) return notFound(res, 'Data pickup tidak ditemukan', MOD);
+    return ok(res, data, 'Detail pickup berhasil diambil', MOD);
+  })
+);
+
+/**
  * PUT /api/driver/pickup/:id/accept
  * Driver menerima pickup request
  * SP: sp_driver_pickup_accept_json(p_user_id, p_pickup_id, p_email_id)

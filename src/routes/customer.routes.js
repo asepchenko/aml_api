@@ -148,6 +148,23 @@ router.get(
 );
 
 /**
+ * GET /api/customer/reports
+ * Mendapatkan data laporan customer termasuk statistik dan grafik
+ * SP: sp_customer_reports_json(p_user_id)
+ */
+router.get(
+  '/reports',
+  authRequired,
+  asyncRoute(async (req, res) => {
+    const userId = req.user.sub;
+
+    const data = await callJsonSP('sp_customer_reports_json', [userId]);
+    if (!data) return notFound(res, 'Data laporan tidak ditemukan', MOD);
+    return ok(res, data, 'Success', MOD);
+  })
+);
+
+/**
  * GET /api/customer/pickup/:id
  * Mendapatkan detail pickup berdasarkan ID
  * SP: sp_customer_pickup_detail_json(p_user_id, p_pickup_id)

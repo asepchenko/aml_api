@@ -486,6 +486,86 @@ BEGIN
     ) as json;
 END//
 
+-- SP: Customer Reports
+DROP PROCEDURE IF EXISTS sp_customer_reports_json//
+DELIMITER //
+
+CREATE PROCEDURE sp_customer_reports_json(
+    IN p_user_id VARCHAR(50)
+)
+proc: BEGIN
+    DECLARE v_customer_id INT;
+    DECLARE v_start_date DATE;
+    DECLARE v_end_date DATE;
+
+    -- Look up customer_id from user_customers
+    SELECT customer_id INTO v_customer_id 
+    FROM user_customers 
+    WHERE id = p_user_id OR email = p_user_id 
+    LIMIT 1;
+
+    /* ================= DATE RANGE: 3 BULAN TERAKHIR ================= */
+    SET v_start_date = DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH);
+    SET v_end_date   = LAST_DAY(CURDATE());
+
+SELECT JSON_OBJECT(
+        /* ================= CHART DATA ================= */
+        'chartData', IFNULL((
+            SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'month', DATE_FORMAT(m.month_date, '%b'),
+                    'orders', m.total_orders,
+                    'delivered', m.total_delivered
+                )
+                ORDER BY m.month_date
+            )
+            FROM (
+                SELECT
+                    DATE_FORMAT(o.pickup_date, '%Y-%m-01') AS month_date,
+                    COUNT(*) AS total_orders,
+                    SUM(CASE WHEN o.last_status = 'Delivered' THEN 1 ELSE 0 END) AS total_delivered
+                FROM orders o
+                WHERE (v_customer_id IS NULL OR o.customer_id = v_customer_id)
+                  AND o.pickup_date >= v_start_date
+                  AND o.pickup_date <= v_end_date
+                GROUP BY DATE_FORMAT(o.pickup_date, '%Y-%m')
+            ) m
+        ), JSON_ARRAY()),
+
+        /* ================= REPORT LIST ================= */
+        'reports', IFNULL((
+            SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'id', r.period_key,
+                    'title', r.title,
+                    'period', r.period_label
+                )
+                ORDER BY r.sort_order DESC
+            )
+            FROM (
+                /* laporan bulanan (3 bulan terakhir) */
+                SELECT
+                    DATE_FORMAT(o.pickup_date, '%Y-%m') AS period_key,
+                    CONCAT(
+                        'Laporan Pengiriman ',
+                        DATE_FORMAT(o.pickup_date, '%M %Y')
+                    ) AS title,
+                    DATE_FORMAT(o.pickup_date, '%M %Y') AS period_label,
+                    YEAR(o.pickup_date) * 100 + MONTH(o.pickup_date) AS sort_order
+                FROM orders o
+                WHERE (v_customer_id IS NULL OR o.customer_id = v_customer_id)
+                  AND o.pickup_date >= v_start_date
+                  AND o.pickup_date <= v_end_date
+                GROUP BY YEAR(o.pickup_date), MONTH(o.pickup_date)
+            ) r
+        ), JSON_ARRAY())
+    ) AS json;
+
+END//
+
+DELIMITER ;
+
+
 -- SP: Customer Profile Get
 DROP PROCEDURE IF EXISTS sp_customer_profile_get_json//
 CREATE PROCEDURE sp_customer_profile_get_json(
@@ -619,6 +699,44 @@ proc: BEGIN
             'totalPages', v_total_pages
         )
     ) AS json;
+END//
+
+-- SP: Driver Pickup Detail
+DROP PROCEDURE IF EXISTS sp_driver_pickup_detail_json//
+CREATE PROCEDURE sp_driver_pickup_detail_json(
+    IN p_user_id VARCHAR(50),
+    IN p_pickup_id VARCHAR(50)
+)
+BEGIN
+    SELECT JSON_OBJECT(
+        'id', pr.id,
+        'code', pr.pickup_code,
+        'date', DATE_FORMAT(pr.created_at, '%d %b %Y, %H:%i'),
+        'customer_name', IFNULL(pr.customer_name, '-'),
+        'pickup_address', IFNULL(pr.pickup_address, '-'),
+        'schedule_date', IFNULL(DATE_FORMAT(pr.schedule_date, '%d %M %Y'), '-'),
+        'schedule_time', IFNULL(pr.schedule_time, '-'),
+        'koli', IFNULL(pr.koli, 0),
+        'weight_kg', IFNULL(pr.weight_kg, 0),
+        'weight_display', CONCAT(IFNULL(pr.weight_kg, 0), ' kg'),
+        'description', IFNULL(pr.description, '-'),
+        'category', IFNULL(pr.category, '-'),
+        'instructions', IFNULL(pr.instructions, '-'),
+        'pic_name', IFNULL(pr.pic_name, '-'),
+        'pic_phone', IFNULL(pr.pic_phone, '-'),
+        'pic_whatsapp', IFNULL(pr.pic_whatsapp, false),
+        'destination_city', IFNULL(pr.destination_city, '-'),
+        'destination_address', IFNULL(pr.destination_address, '-'),
+        'status', pr.status,
+        'driver', (SELECT u.name FROM users u WHERE u.id = pr.driver_id LIMIT 1),
+        'eta', IFNULL(pr.eta, '—'),
+        'confirmed_koli', IFNULL(pr.confirmed_koli, 0),
+        'pickup_photo', IFNULL(pr.pickup_photo, NULL),
+        'confirmed_at', DATE_FORMAT(pr.confirmed_at, '%d %b %Y, %H:%i')
+    ) AS json
+    FROM pickup_requests pr
+    WHERE pr.id = p_pickup_id OR pr.pickup_code = p_pickup_id
+    LIMIT 1;
 END//
 
 -- SP: Driver Pickup Accept
