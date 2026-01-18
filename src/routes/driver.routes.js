@@ -210,7 +210,6 @@ router.put(
 router.post(
   '/pickup/:id/confirm',
   authRequired,
-  upload.single('photo'),
   [
     param('id').isString().notEmpty()
   ],
@@ -219,8 +218,33 @@ router.post(
     const { id } = req.params;
     const confirmedKoli = parseInt(req.body.confirmed_koli) || 0;
     const driverName = req.body.driver_name || null;
-    const filePath = req.file ? req.file.path : null;
-    const photoUrl = req.file ? `/uploads/pickup-photos/${req.file.filename}` : null;
+    const photoBase64 = req.body.photo; // Base64 string from body
+
+    let photoUrl = null;
+    let filePath = null;
+
+    if (photoBase64) {
+      try {
+        // Decode base64 and save file
+        const matches = photoBase64.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+        
+        if (!matches || matches.length !== 3) {
+          return bad(res, 'Format photo base64 tidak valid', 400, MOD, SPECIFIC.INVALID);
+        }
+
+        const extension = matches[1];
+        const base64Data = matches[2];
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const filename = `pickup-${uniqueSuffix}.${extension}`;
+        filePath = `uploads/pickup-photos/${filename}`;
+        
+        fs.writeFileSync(filePath, base64Data, { encoding: 'base64' });
+        photoUrl = `/uploads/pickup-photos/${filename}`;
+      } catch (error) {
+        console.error('[BASE64 SAVE ERROR]', error);
+        return bad(res, 'Gagal menyimpan foto', 500, MOD, SPECIFIC.ERROR);
+      }
+    }
 
     const data = await callJsonSP('sp_driver_pickup_confirm_json', [userId, id, confirmedKoli, photoUrl, driverName]);
     
