@@ -308,13 +308,52 @@ router.get(
  * Scan koli barcode (auto-detect STT dari koli ID)
  * SP: sp_driver_scan_koli_json(p_user_id, p_koli_id, p_city_name, p_last_location)
  */
+// router.post(
+//   '/scan/koli',
+//   authRequired,
+//   [
+//     body('koli_id').isString().notEmpty().withMessage('koli_id wajib diisi'),
+//     body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
+//     body('longitude').isFloat().withMessage('longitude wajib berupa angka')
+//   ],
+//   asyncRoute(async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+//     }
+
+//     const userId = req.user.sub;
+//     const { koli_id, latitude, longitude } = req.body;
+
+//     // Reverse geocode lat/long to city_name and last_location
+//     const geoData = await reverseGeocode(latitude, longitude);
+//     const cityName = geoData.cityName;
+//     const lastLocation = geoData.lastLocation;
+
+//     const data = await callJsonSP('sp_driver_scan_koli_json', [userId, koli_id, cityName, lastLocation]);
+    
+//     if (!data) {
+//       return bad(res, `Koli ${koli_id} tidak ditemukan.`, 400, MOD, SPECIFIC.NOT_FOUND);
+//     }
+
+//     // Handle error responses from SP
+//     if (data.error === 'not_found') {
+//       return bad(res, `Koli ${koli_id} tidak ditemukan.`, 400, MOD, SPECIFIC.NOT_FOUND);
+//     }
+    
+//     const message = `Koli ${koli_id} berhasil di-scan. (${data.scanned_count}/${data.total_count} koli)`;
+//     return ok(res, data, message, MOD);
+//   })
+// );
+
 router.post(
   '/scan/koli',
   authRequired,
   [
-    body('koli_id').isString().notEmpty().withMessage('koli_id wajib diisi'),
-    body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
-    body('longitude').isFloat().withMessage('longitude wajib berupa angka')
+    body('tripId').isString().notEmpty().withMessage('tripId wajib diisi'),
+    body('manifestId').isString().notEmpty().withMessage('manifestId wajib diisi'),
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
   ],
   asyncRoute(async (req, res) => {
     const errors = validationResult(req);
@@ -323,28 +362,32 @@ router.post(
     }
 
     const userId = req.user.sub;
-    const { koli_id, latitude, longitude } = req.body;
+    const { tripId, manifestId, sttNumber, koliId } = req.body;
 
-    // Reverse geocode lat/long to city_name and last_location
-    const geoData = await reverseGeocode(latitude, longitude);
-    const cityName = geoData.cityName;
-    const lastLocation = geoData.lastLocation;
+    try {
+      const data = await callJsonSP('sp_driver_scan_koli_json', [userId, tripId, manifestId, sttNumber, koliId]);
+      
+      if (!data) {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
 
-    const data = await callJsonSP('sp_driver_scan_koli_json', [userId, koli_id, cityName, lastLocation]);
-    
-    if (!data) {
-      return bad(res, `Koli ${koli_id} tidak ditemukan.`, 400, MOD, SPECIFIC.NOT_FOUND);
+      if (data.error === 'not_found') {
+        return bad(res, `Koli ${koliId} tidak ditemukan di STT ${sttNumber}`, 400, MOD, SPECIFIC.NOT_FOUND);
+      }
+
+      if (data.error === 'already_scanned') {
+        return bad(res, `Koli ${koliId} sudah pernah di-scan sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+      }
+
+      const message = `Koli ${koliId} berhasil di-scan. (${data.scannedCount}/${data.totalCount} koli)`;
+      return ok(res, data, message, MOD);
+    } catch (err) {
+      console.error('[LOADING SCAN ERROR]', err);
+      return bad(res, 'Gagal scan koli', 500, MOD, SPECIFIC.ERROR);
     }
-
-    // Handle error responses from SP
-    if (data.error === 'not_found') {
-      return bad(res, `Koli ${koli_id} tidak ditemukan.`, 400, MOD, SPECIFIC.NOT_FOUND);
-    }
-    
-    const message = `Koli ${koli_id} berhasil di-scan. (${data.scanned_count}/${data.total_count} koli)`;
-    return ok(res, data, message, MOD);
   })
 );
+
 
 /**
  * POST /api/driver/scan/stt/hold
@@ -367,10 +410,23 @@ router.post(
 
     const userId = req.user.sub;
     const { trip_id, stt_number, reason } = req.body;
+    try {
+      const data = await callJsonSP('sp_driver_stt_hold_json', [userId, trip_id, stt_number, reason]);
+    
 
-    const data = await callJsonSP('sp_driver_stt_hold_json', [userId, trip_id, stt_number, reason]);
-    if (!data) return bad(res, 'Gagal hold STT', 400, MOD, SPECIFIC.INVALID);
+    if (data.error === 'not_found') {
+      return bad(res, `STT ${stt_number} tidak ditemukan`, 400, MOD, SPECIFIC.NOT_FOUND);
+    }
+
+    if (data.error === 'already_hold') {
+      return bad(res, `STT ${stt_number} sudah pernah di-hold sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+    }
+    // if (!data) return bad(res, 'Gagal hold STT', 400, MOD, SPECIFIC.INVALID);
     return ok(res, data, `STT ${stt_number} telah di-hold.`, MOD);
+  } catch (err) {
+    console.error('[HOLD STT ERROR]', err);
+    return bad(res, 'Gagal hold STT', 500, MOD, SPECIFIC.ERROR);
+  }
   })
 );
 
