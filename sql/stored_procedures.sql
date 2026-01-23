@@ -1025,20 +1025,86 @@ CREATE PROCEDURE sp_driver_location_update_json(
     IN p_user_id VARCHAR(50),
     IN p_trip_id VARCHAR(50),
     IN p_latitude DECIMAL(10,6),
-    IN p_longitude DECIMAL(10,6)
+    IN p_longitude DECIMAL(10,6),
+    IN p_address TEXT,
+    IN p_city VARCHAR(100),
+    IN p_region VARCHAR(100),
+    IN p_timestamp DATETIME
 )
 BEGIN
+    DECLARE v_city_id INT;
+    DECLARE v_updated_stts JSON;
+    
+    -- Ambil city_id berdasarkan nama kota
+    SELECT id INTO v_city_id FROM cities WHERE city_name LIKE CONCAT('%', p_city, '%') LIMIT 1;
+    
+    -- Update lokasi terakhir di tabel trips
+    UPDATE trips 
+    SET last_location = p_address,
+        last_city = p_city,
+        last_update = p_timestamp,
+        updated_at = NOW()
+    WHERE trip_number = p_trip_id;
+    
+    -- Insert tracking baru "On Process Delivery" untuk semua order dalam trip tersebut
+    INSERT INTO order_trackings (
+        order_number, 
+        status_date, 
+        status_name, 
+        city_id, 
+        description, 
+        user_id, 
+        created_at, 
+        updated_at
+    )
+    SELECT 
+        md.order_number, 
+        p_timestamp, 
+        'On Process Delivery', 
+        v_city_id, 
+        CONCAT(p_address, ' (', p_latitude, ', ', p_longitude, ')'), 
+        p_user_id, 
+        NOW(), 
+        NOW()
+    FROM trip_details td
+    JOIN manifest_details md ON td.manifest_number = md.manifest_number
+    WHERE td.trip_number = p_trip_id;
+    
+    -- Update status terakhir di tabel orders
+    UPDATE orders o
+    JOIN manifest_details md ON o.order_number = md.order_number
+    JOIN trip_details td ON md.manifest_number = td.manifest_number
+    SET o.last_status = 'On Process Delivery',
+        o.updated_at = NOW()
+    WHERE td.trip_number = p_trip_id;
+
+    -- Ambil daftar STT (awb_no) yang diupdate untuk dikembalikan dalam response
+    SELECT JSON_ARRAYAGG(awb_no) INTO v_updated_stts
+    FROM (
+        SELECT DISTINCT o.awb_no
+        FROM orders o
+        JOIN manifest_details md ON o.order_number = md.order_number
+        JOIN trip_details td ON md.manifest_number = td.manifest_number
+        WHERE td.trip_number = p_trip_id
+    ) AS tmp;
+
+    -- Return response sesuai format dokumentasi
     SELECT JSON_OBJECT(
-        'trip_id', p_trip_id,
-        'location', JSON_OBJECT(
-            'latitude', p_latitude,
-            'longitude', p_longitude,
-            'address', 'Jl. Gatot Subroto',
-            'city', 'Jakarta',
-            'region', 'DKI Jakarta',
-            'timestamp', DATE_FORMAT(NOW(), '%Y-%m-%dT%H:%i:%sZ')
-        ),
-        'updated_stts', JSON_ARRAY('STT20251105')
+        'success', true,
+        'responseCode', '2000300',
+        'responseMessage', 'Location berhasil diupdate',
+        'data', JSON_OBJECT(
+            'trip_id', p_trip_id,
+            'location', JSON_OBJECT(
+                'latitude', p_latitude,
+                'longitude', p_longitude,
+                'address', p_address,
+                'city', p_city,
+                'region', p_region,
+                'timestamp', DATE_FORMAT(p_timestamp, '%Y-%m-%dT%H:%i:%sZ')
+            ),
+            'updated_stts', IFNULL(v_updated_stts, JSON_ARRAY())
+        )
     ) as json;
 END//
 

@@ -441,7 +441,11 @@ router.post(
   [
     body('trip_id').isString().notEmpty().withMessage('trip_id wajib diisi'),
     body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
-    body('longitude').isFloat().withMessage('longitude wajib berupa angka')
+    body('longitude').isFloat().withMessage('longitude wajib berupa angka'),
+    body('address').isString().notEmpty().withMessage('address wajib diisi'),
+    body('city').isString().notEmpty().withMessage('city wajib diisi'),
+    body('region').isString().notEmpty().withMessage('region wajib diisi'),
+    body('timestamp').isString().notEmpty().withMessage('timestamp wajib diisi')
   ],
   asyncRoute(async (req, res) => {
     const errors = validationResult(req);
@@ -450,11 +454,31 @@ router.post(
     }
 
     const userId = req.user.sub;
-    const { trip_id, latitude, longitude } = req.body;
-
-    const data = await callJsonSP('sp_driver_location_update_json', [userId, trip_id, latitude, longitude]);
-    if (!data) return bad(res, 'Gagal update location', 400, MOD, SPECIFIC.INVALID);
-    return ok(res, data, 'Location berhasil diupdate', MOD);
+    const { trip_id, latitude, longitude, address, city, region, timestamp } = req.body;
+    try{
+      const data = await callJsonSP('sp_driver_location_update_json', [
+        userId, 
+        trip_id, 
+        latitude, 
+        longitude,
+        address,
+        city,
+        region,
+        timestamp
+      ]);
+      if (data.error === 'not_found') {
+        return bad(res, `Data Trip ${trip_id} tidak ditemukan`, 400, MOD, SPECIFIC.NOT_FOUND);
+      }
+  
+      // if (data.error === 'already_hold') {
+      //   return bad(res, `STT ${stt_number} sudah pernah di-hold sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+      // }
+       // if (!data) return bad(res, 'Gagal update location', 400, MOD, SPECIFIC.INVALID);
+      return ok(res, data, 'Location berhasil diupdate', MOD);
+    } catch (err) {
+      console.error('[UPDATE LOCATION ERROR]', err);
+      return bad(res, 'Gagal update location', 500, MOD, SPECIFIC.ERROR);
+    }    
   })
 );
 
