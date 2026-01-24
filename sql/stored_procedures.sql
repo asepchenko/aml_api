@@ -1109,62 +1109,129 @@ BEGIN
 END//
 
 -- SP: Driver Notifications
-DROP PROCEDURE IF EXISTS sp_driver_notifications_json//
-CREATE PROCEDURE sp_driver_notifications_json(
-    IN p_user_id VARCHAR(50),
-    IN p_is_read BOOLEAN,
+DELIMITER //
+
+DROP  PROCEDURE IF EXISTS sp_driver_notifications_json;
+CREATE PROCEDURE sp_driver_notifications_json  (
+    IN p_user_id INT,
+    IN p_is_read TINYINT(1),
     IN p_type VARCHAR(50),
     IN p_page INT,
     IN p_limit INT
 )
 BEGIN
+    DECLARE v_offset INT DEFAULT 0;
+    DECLARE v_total INT DEFAULT 0;
+    DECLARE v_total_pages INT DEFAULT 0;
+    DECLARE v_unread_count INT DEFAULT 0;
+
+    SET p_page = IF(p_page < 1, 1, p_page);
+    SET p_limit = IF(p_limit < 1, 10, p_limit);
+    SET v_offset = (p_page - 1) * p_limit;
+
+    /* ===== TOTAL DATA ===== */
+    SELECT COUNT(*)
+    INTO v_total
+    FROM notification_androids na
+    WHERE na.user_id = p_user_id
+      AND na.role = 'driver'
+      AND na.notif_date >= CURDATE() - INTERVAL 30 DAY
+      AND (p_is_read IS NULL OR na.is_read = p_is_read)
+              AND (p_type IS NULL OR na.notif_type = p_type);
+
+    SET v_total_pages = CEIL(v_total / p_limit);
+
+    /* ===== UNREAD COUNT ===== */
+    SELECT COUNT(*)
+    INTO v_unread_count
+    FROM notification_androids
+    WHERE user_id = p_user_id
+      AND role = 'driver'
+      AND is_read = 0
+      AND notif_date >= CURDATE() - INTERVAL 30 DAY;
+
+    /* ===== MAIN JSON ===== */
     SELECT JSON_OBJECT(
-        'notifications', JSON_ARRAY(
-            JSON_OBJECT(
-                'id', 'notif-1',
-                'type', 'pickup_new',
-                'title', 'Pickup Baru',
-                'message', 'Pickup request baru dari Ahmad Rizki - Jl. Sudirman No. 123, Jakarta Pusat',
-                'timestamp', DATE_FORMAT(NOW(), '%Y-%m-%dT%H:%i:%sZ'),
-                'is_read', false,
-                'pickup_id', '1',
-                'metadata', JSON_OBJECT(
-                    'pickup_code', '#PU-2024-001234',
-                    'schedule_date', '15 Januari 2025',
-                    'schedule_time', '14:30'
+        'notifications',
+        COALESCE((
+            SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'id', n.id,
+                    'type', n.notif_type,
+                    'title', n.title,
+                    'content', n.message,
+                    'timestamp', DATE_FORMAT(n.notif_date, '%Y-%m-%dT%H:%i:%sZ'),
+                    'is_read', IF(n.is_read = 1, TRUE, FALSE),
+                    'pickup_id', n.content_id,
+                    'metadata', JSON_OBJECT(
+                        'pickup_code', p.request_number,
+                        'schedule_date', DATE_FORMAT(p.request_date, '%d %M %Y'),
+                        'schedule_time', DATE_FORMAT(p.request_time, '%H:%i')
+                    )
                 )
             )
-        ),
-        'unread_count', 5,
+            FROM notification_androids n
+            LEFT JOIN pickup_requests p ON p.id = n.content_id
+            WHERE n.user_id = p_user_id
+              AND n.role = 'driver'
+              AND n.notif_date >= CURDATE() - INTERVAL 30 DAY
+              AND (p_is_read IS NULL OR n.is_read = p_is_read)
+              AND (p_type IS NULL OR n.notif_type = p_type)
+            ORDER BY n.notif_date DESC
+            LIMIT v_offset, p_limit
+        ), JSON_ARRAY()),
+
+        'unread_count', v_unread_count,
+
         'pagination', JSON_OBJECT(
             'page', p_page,
             'limit', p_limit,
-            'total', 15
+            'total', v_total,
+            'totalPages', v_total_pages
         )
-    ) as json;
+    ) AS json_result;
 END//
+
+DELIMITER ;
+
 
 -- SP: Driver Notification Read
 DROP PROCEDURE IF EXISTS sp_driver_notification_read_json//
 CREATE PROCEDURE sp_driver_notification_read_json(
-    IN p_user_id VARCHAR(50),
-    IN p_notification_id VARCHAR(50)
+    IN p_user_id INT,
+    IN p_notification_id INT
 )
 BEGIN
+    UPDATE notification_androids 
+    SET is_read = 1
+    WHERE id = p_notification_id 
+      AND user_id = p_user_id 
+      AND role = 'driver';
+
     SELECT JSON_OBJECT(
-        'id', p_notification_id,
-        'is_read', true
+        'id', CAST(p_notification_id AS CHAR),
+        'is_read', TRUE
     ) as json;
 END//
 
 -- SP: Driver Notification Read All
 DROP PROCEDURE IF EXISTS sp_driver_notification_read_all_json//
 CREATE PROCEDURE sp_driver_notification_read_all_json(
-    IN p_user_id VARCHAR(50)
+    IN p_user_id INT
 )
 BEGIN
+    DECLARE v_count INT DEFAULT 0;
+
+    UPDATE notification_androids 
+    SET is_read = 1
+    WHERE user_id = p_user_id 
+      AND role = 'driver'
+      AND is_read = 0;
+    
+    SET v_count = ROW_COUNT();
+
     SELECT JSON_OBJECT(
-        'count', 5
+        'count', v_count
     ) as json;
 END//
 
