@@ -1,17 +1,9 @@
 import { Router } from 'express';
 import { body, query, param, validationResult } from 'express-validator';
 import multer from 'multer';
-import fs from 'fs';
 import { authRequired } from '../middleware/auth.js';
 import { callJsonSP } from '../db.js';
 import { ok, bad, notFound, MODULE, SPECIFIC, asyncRoute } from '../utils/http.js';
-
-// Helper function to delete uploaded file
-const deleteUploadedFile = (filePath) => {
-  if (filePath && fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-};
 
 // Reverse geocoding using OpenStreetMap Nominatim API
 const reverseGeocode = async (latitude, longitude) => {
@@ -220,52 +212,22 @@ router.post(
     const driverName = req.body.driver_name || null;
     const photoBase64 = req.body.photo; // Base64 string from body
 
-    let photoUrl = null;
-    let filePath = null;
-
-    if (photoBase64) {
-      try {
-        // Decode base64 and save file
-        const matches = photoBase64.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
-        
-        if (!matches || matches.length !== 3) {
-          return bad(res, 'Format photo base64 tidak valid', 400, MOD, SPECIFIC.INVALID);
-        }
-
-        const extension = matches[1];
-        const base64Data = matches[2];
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const filename = `pickup-${uniqueSuffix}.${extension}`;
-        filePath = `uploads/pickup-photos/${filename}`;
-        
-        fs.writeFileSync(filePath, base64Data, { encoding: 'base64' });
-        photoUrl = `/uploads/pickup-photos/${filename}`;
-      } catch (error) {
-        console.error('[BASE64 SAVE ERROR]', error);
-        return bad(res, 'Gagal menyimpan foto', 500, MOD, SPECIFIC.ERROR);
-      }
-    }
-
-    const data = await callJsonSP('sp_driver_pickup_confirm_json', [userId, id, confirmedKoli, photoUrl, driverName]);
+    const data = await callJsonSP('sp_driver_pickup_confirm_json', [userId, id, confirmedKoli, photoBase64, driverName]);
     
     if (!data) {
-      deleteUploadedFile(filePath); // Hapus file jika gagal
       return bad(res, 'Gagal konfirmasi pickup', 400, MOD, SPECIFIC.INVALID);
     }
 
     // Handle error responses from SP
     if (data.error === 'not_found') {
-      deleteUploadedFile(filePath); // Hapus file jika pickup tidak ditemukan
       return notFound(res, 'Pickup request tidak ditemukan', MOD);
     }
 
     if (data.error === 'already_confirmed') {
-      deleteUploadedFile(filePath); // Hapus file jika sudah dikonfirmasi
       return bad(res, 'Pickup sudah dikonfirmasi sebelumnya', 400, MOD, SPECIFIC.INVALID);
     }
 
     if (data.error === 'not_accepted') {
-      deleteUploadedFile(filePath); // Hapus file jika belum di-accept
       return bad(res, 'Pickup belum di-accept, tidak bisa dikonfirmasi', 400, MOD, SPECIFIC.INVALID);
     }
 

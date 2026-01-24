@@ -773,7 +773,7 @@ CREATE PROCEDURE sp_driver_pickup_confirm_json(
     IN p_user_id VARCHAR(50),
     IN p_pickup_id VARCHAR(50),
     IN p_confirmed_koli INT,
-    IN p_photo_url VARCHAR(500),
+    IN p_photo_base64 LONGTEXT,
     IN p_driver_name VARCHAR(100)
 )
 proc: BEGIN
@@ -810,7 +810,7 @@ proc: BEGIN
     UPDATE pickup_requests
     SET status = 'done',
         confirmed_koli = p_confirmed_koli,
-        pickup_photo = p_photo_url,
+        pickup_photo = p_photo_base64,
         confirmed_at = v_confirmed_at,
         driver_name = IFNULL(p_driver_name, driver_name)
     WHERE request_number = p_pickup_id;
