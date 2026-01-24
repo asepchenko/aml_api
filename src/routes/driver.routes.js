@@ -266,6 +266,123 @@ router.get(
 );
 
 /**
+ * GET /api/driver/orders
+ * Mendapatkan daftar trips/orders untuk driver
+ * SP: sp_driver_orders_json(p_user_id, p_status, p_page, p_limit)
+ */
+router.get(
+  '/orders',
+  authRequired,
+  [
+    query('status').optional().isIn(['In_Progress', 'Closing']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 100 })
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const status = req.query.status || 'In_Progress';
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const data = await callJsonSP('sp_driver_orders_json', [userId, status, page, limit]);
+    if (!data) return notFound(res, 'Data orders tidak ditemukan', MOD);
+    return ok(res, data, 'Daftar trips/orders berhasil diambil', MOD);
+  })
+);
+
+/**
+ * GET /api/driver/manifests/:manifestId/stts
+ * Mendapatkan daftar STT berdasarkan manifest ID (Versi Driver)
+ * SP: sp_driver_manifest_stts_json(p_user_id, p_manifest_id, p_trip_id, p_search, p_page, p_limit)
+ */
+router.get(
+  '/manifests/:manifestId/stts',
+  authRequired,
+  asyncRoute(async (req, res) => {
+    const { manifestId } = req.params;
+    
+    if (!manifestId) {
+      return bad(res, 'manifestId wajib diisi', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const search = req.query.search || null;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+
+    try {
+      const data = await callJsonSP('sp_driver_manifest_stts_json', [manifestId, search, page, limit]);
+      
+      if (!data) {
+        return notFound(res, 'Manifest tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'manifest_not_found') {
+        return notFound(res, 'Manifest tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'invalid_trip') {
+        return bad(res, 'TripId tidak valid atau manifest tidak termasuk dalam trip tersebut', 400, MOD, SPECIFIC.INVALID);
+      }
+
+      return ok(res, data, 'Daftar STT berhasil diambil', MOD);
+    } catch (err) {
+      console.error('[DRIVER MANIFEST STTS ERROR]', err);
+      return bad(res, 'Gagal mengambil data STT', 500, MOD, SPECIFIC.ERROR);
+    }
+  })
+);
+
+/**
+ * GET /api/driver/stts/:sttNumber/kolis
+ * Mendapatkan daftar koli dari STT tertentu (Versi Driver)
+ * SP: sp_driver_stt_kolis_json(p_stt_number, p_trip_id, p_manifest_id)
+ */
+router.get(
+  '/stts/:sttNumber/kolis',
+  authRequired,
+  [
+    param('sttNumber').notEmpty().withMessage('sttNumber wajib diisi'),
+    query('tripId').notEmpty().withMessage('tripId wajib diisi'),
+    query('manifestId').notEmpty().withMessage('manifestId wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const { sttNumber } = req.params;
+    const { tripId, manifestId } = req.query;
+
+    try {
+      const data = await callJsonSP('sp_driver_stt_kolis_json', [sttNumber, tripId, manifestId]);
+      
+      if (!data) {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'stt_not_found') {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'invalid_params') {
+        return bad(res, 'TripId atau ManifestId tidak valid', 400, MOD, SPECIFIC.INVALID);
+      }
+
+      return ok(res, data, 'Daftar koli berhasil diambil', MOD);
+    } catch (err) {
+      console.error('[DRIVER STT KOLIS ERROR]', err);
+      return bad(res, 'Gagal mengambil data koli', 500, MOD, SPECIFIC.ERROR);
+    }
+  })
+);
+
+/**
  * POST /api/driver/scan/koli
  * Scan koli barcode (auto-detect STT dari koli ID)
  * SP: sp_driver_scan_koli_json(p_user_id, p_koli_id, p_city_name, p_last_location)

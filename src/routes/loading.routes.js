@@ -54,85 +54,6 @@ router.get(
 );
 
 /**
- * GET /api/loading/history
- * Mendapatkan history trips yang sudah selesai
- * SP: sp_loading_history_json(p_user_id, p_date_from, p_date_to, p_page, p_limit)
- */
-router.get(
-  '/history',
-  authRequired,
-  [
-    query('dateFrom').optional().isString(),
-    query('dateTo').optional().isString(),
-    query('page').optional().isInt({ min: 1 }),
-    query('limit').optional().isInt({ min: 1, max: 100 })
-  ],
-  asyncRoute(async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
-    }
-
-    const userId = req.user.sub;
-    const dateFrom = req.query.dateFrom || null;
-    const dateTo = req.query.dateTo || null;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-
-    const data = await callJsonSP('sp_loading_history_json', [userId, dateFrom, dateTo, page, limit]);
-    if (!data) return notFound(res, 'Data history tidak ditemukan', MOD);
-    return ok(res, data, 'History trips berhasil diambil', MOD);
-  })
-);
-
-/**
- * POST /api/loading/scan/koli
- * Scan koli barcode untuk update status scanned di loading department
- * SP: sp_loading_scan_koli_json(p_user_id, p_trip_id, p_manifest_id, p_stt_number, p_koli_id)
- */
-router.post(
-  '/scan/koli',
-  authRequired,
-  [
-    body('tripId').isString().notEmpty().withMessage('tripId wajib diisi'),
-    body('manifestId').isString().notEmpty().withMessage('manifestId wajib diisi'),
-    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
-    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
-  ],
-  asyncRoute(async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
-    }
-
-    const userId = req.user.sub;
-    const { tripId, manifestId, sttNumber, koliId } = req.body;
-
-    try {
-      const data = await callJsonSP('sp_loading_scan_koli_json', [userId, tripId, manifestId, sttNumber, koliId]);
-      
-      if (!data) {
-        return notFound(res, 'STT tidak ditemukan', MOD);
-      }
-
-      if (data.error === 'not_found') {
-        return bad(res, `Koli ${koliId} tidak ditemukan di STT ${sttNumber}`, 400, MOD, SPECIFIC.NOT_FOUND);
-      }
-
-      if (data.error === 'already_scanned') {
-        return bad(res, `Koli ${koliId} sudah pernah di-scan sebelumnya`, 400, MOD, SPECIFIC.INVALID);
-      }
-
-      const message = `Koli ${koliId} berhasil di-scan. (${data.scannedCount}/${data.totalCount} koli)`;
-      return ok(res, data, message, MOD);
-    } catch (err) {
-      console.error('[LOADING SCAN ERROR]', err);
-      return bad(res, 'Gagal scan koli', 500, MOD, SPECIFIC.ERROR);
-    }
-  })
-);
-
-/**
  * GET /api/loading/manifests/:manifestId/stts
  * Mendapatkan daftar STT berdasarkan manifest ID
  * SP: sp_loading_manifest_stts_json(p_user_id, p_manifest_id, p_trip_id, p_search, p_page, p_limit)
@@ -219,6 +140,87 @@ router.get(
     }
   })
 );
+
+/**
+ * GET /api/loading/history
+ * Mendapatkan history trips yang sudah selesai
+ * SP: sp_loading_history_json(p_user_id, p_date_from, p_date_to, p_page, p_limit)
+ */
+router.get(
+  '/history',
+  authRequired,
+  [
+    query('dateFrom').optional().isString(),
+    query('dateTo').optional().isString(),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 100 })
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const dateFrom = req.query.dateFrom || null;
+    const dateTo = req.query.dateTo || null;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const data = await callJsonSP('sp_loading_history_json', [userId, dateFrom, dateTo, page, limit]);
+    if (!data) return notFound(res, 'Data history tidak ditemukan', MOD);
+    return ok(res, data, 'History trips berhasil diambil', MOD);
+  })
+);
+
+/**
+ * POST /api/loading/scan/koli
+ * Scan koli barcode untuk update status scanned di loading department
+ * SP: sp_loading_scan_koli_json(p_user_id, p_trip_id, p_manifest_id, p_stt_number, p_koli_id)
+ */
+router.post(
+  '/scan/koli',
+  authRequired,
+  [
+    body('tripId').isString().notEmpty().withMessage('tripId wajib diisi'),
+    body('manifestId').isString().notEmpty().withMessage('manifestId wajib diisi'),
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { tripId, manifestId, sttNumber, koliId } = req.body;
+
+    try {
+      const data = await callJsonSP('sp_loading_scan_koli_json', [userId, tripId, manifestId, sttNumber, koliId]);
+      
+      if (!data) {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'not_found') {
+        return bad(res, `Koli ${koliId} tidak ditemukan di STT ${sttNumber}`, 400, MOD, SPECIFIC.NOT_FOUND);
+      }
+
+      if (data.error === 'already_scanned') {
+        return bad(res, `Koli ${koliId} sudah pernah di-scan sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+      }
+
+      const message = `Koli ${koliId} berhasil di-scan. (${data.scannedCount}/${data.totalCount} koli)`;
+      return ok(res, data, message, MOD);
+    } catch (err) {
+      console.error('[LOADING SCAN ERROR]', err);
+      return bad(res, 'Gagal scan koli', 500, MOD, SPECIFIC.ERROR);
+    }
+  })
+);
+
+
 
 /**
  * GET /api/loading/profile

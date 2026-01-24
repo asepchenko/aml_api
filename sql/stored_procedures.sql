@@ -53,143 +53,176 @@ CREATE PROCEDURE sp_customer_dashboard_json(
     IN p_user_id VARCHAR(50)
 )
 BEGIN
+    DECLARE v_total_order INT DEFAULT 0;
+    DECLARE v_in_progress INT DEFAULT 0;
+    DECLARE v_completed INT DEFAULT 0;
+    
+    -- Count total orders
+    SELECT COUNT(*) INTO v_total_order
+    FROM orders
+    WHERE customer_id = p_user_id AND pickup_date >= CURDATE() - INTERVAL 30 DAY; -- >=  DATE_FORMAT(CURDATE(), '%Y-%m-01') AND pickup_date <= LAST_DAY(CURDATE());
+    
+    -- Count in progress orders
+    SELECT COUNT(*) INTO v_in_progress
+    FROM orders
+    WHERE customer_id = p_user_id
+      AND last_status != 'Delivered' AND pickup_date >= CURDATE() - INTERVAL 30 DAY; -- >=  DATE_FORMAT(CURDATE(), '%Y-%m-01') AND pickup_date <= LAST_DAY(CURDATE());
+    
+    -- Count completed orders
+    SELECT COUNT(*) INTO v_completed
+    FROM orders
+    WHERE customer_id = p_user_id
+      AND last_status = 'Delivered' AND pickup_date >= CURDATE() - INTERVAL 30 DAY; -- >=  DATE_FORMAT(CURDATE(), '%Y-%m-01') AND pickup_date <= LAST_DAY(CURDATE());
+    
+    -- Return dashboard data
     SELECT JSON_OBJECT(
         'stats', JSON_ARRAY(
-            JSON_OBJECT('label', 'Total Order', 'value', '45'),
-            JSON_OBJECT('label', 'Dalam Perjalanan', 'value', '8'),
-            JSON_OBJECT('label', 'Selesai', 'value', '37')
+            JSON_OBJECT('label', 'Total Order', 'value', CAST(v_total_order AS CHAR)),
+            JSON_OBJECT('label', 'Dalam Perjalanan', 'value', CAST(v_in_progress AS CHAR)),
+            JSON_OBJECT('label', 'Selesai', 'value', CAST(v_completed AS CHAR))
         ),
-        'recentOrders', JSON_ARRAY(
-            JSON_OBJECT(
-                'id', 'TRIP0001',
-                'destination', 'Jakarta → Medan',
-                'status', 'in_progress',
-                'lastUpdate', '2 jam lalu'
-            ),
-            JSON_OBJECT(
-                'id', 'TRIP0002',
-                'destination', 'Jakarta → Surabaya',
-                'status', 'completed',
-                'lastUpdate', '1 hari lalu'
+        'recentOrders', IFNULL((
+            SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'id', t.awb_no,
+                    'destination',t.destination,
+                    'status', t.last_status,
+                    'lastUpdate', CASE
+                        WHEN TIMESTAMPDIFF(MINUTE, t.last_update, NOW()) < 60 
+                            THEN CONCAT(TIMESTAMPDIFF(MINUTE, t.last_update, NOW()), ' menit lalu')
+                        WHEN TIMESTAMPDIFF(HOUR, t.last_update, NOW()) < 24 
+                            THEN CONCAT(TIMESTAMPDIFF(HOUR, t.last_update, NOW()), ' jam lalu')
+                        WHEN TIMESTAMPDIFF(DAY, t.last_update, NOW()) < 7 
+                            THEN CONCAT(TIMESTAMPDIFF(DAY, t.last_update, NOW()), ' hari lalu')
+                        ELSE DATE_FORMAT(t.last_update, '%d %b %Y')
+                    END
+                )
             )
-        )
-    ) as json;
-END//
+            FROM (
+                   SELECT a.awb_no, concat(b.city_name, ' → ',c.city_name) AS destination, a.last_status, 
+						(SELECT MAX(z.updated_at) FROM order_trackings z WHERE z.order_number = a.order_number) AS last_update FROM orders a 
+						LEFT JOIN cities b ON a.origin = b.id 
+						LEFT JOIN cities c ON a.destination = c.id 
+						WHERE a.customer_id = p_user_id
+					   ORDER BY a.updated_at DESC
+                LIMIT 5
+            ) t
+        ), JSON_ARRAY())
+    ) AS json;
+END
 
 -- SP: Customer Orders List
-DROP PROCEDURE IF EXISTS sp_customer_orders_json_ache//
-CREATE PROCEDURE sp_customer_orders_json(
-    IN p_user_id VARCHAR(50),
-    IN p_status VARCHAR(20),
-    IN p_page INT,
-    IN p_limit INT
+DROP  PROCEDURE IF EXISTS sp_customer_orders_json;
+CREATE PROCEDURE 'sp_customer_orders_json'(
+	IN 'p_user_id' VARCHAR(50),
+	IN 'p_status' VARCHAR(20),
+	IN 'p_page' INT,
+	IN 'p_limit' INT
 )
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
 BEGIN
+    DECLARE v_offset INT DEFAULT 0;
+    DECLARE v_total INT DEFAULT 0;
+    DECLARE v_total_pages INT DEFAULT 0;
+  --  SET p_limit = 5;
+  --  SET v_total = 20;
+
+    SET v_offset = (p_page - 1) * p_limit;
+
+    /* ================= TOTAL DATA ================= */
+   
+	SELECT COUNT(*)
+    INTO v_total
+    FROM orders t
+    WHERE t.customer_id = p_user_id
+      AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
+      AND t.pickup_date >= CURDATE() - INTERVAL 30 DAY;
+   
+
+    SET v_total_pages = CEIL(v_total * 1.0 / p_limit);
+
+    /* ================= MAIN JSON ================= */
     SELECT JSON_OBJECT(
-        'orders', JSON_ARRAY(
-            JSON_OBJECT(
-                'tripId': '00033',
-				'route': 'Jakarta → Medan',
-				'pickupDate': '14 Okt 2025',
-				'status': 'in_progress',
-				'lastLocation': 'Jl. Gatot Subroto, Jakarta',
-				'lastCity': 'Jakarta',
-				'lastUpdate': '15 Okt 2025, 14:30',
-				'deliveryDate' : '24 Okt 2025 15:15',
-				'receipent' : 'Anwar',
-				'contains' : 'Paper Bag',
-				'volume': '33',
-				'JmlColly' : '1',
-                'keterangan' : 'barang DC',
-                'trackings', JSON_ARRAY(
-                    JSON_OBJECT(
-                        'StatusName': 'In Warehouse',
-						'city': 'Jakarta',
-						'lastLocation': 'Jl. Gatot Subroto, Jakarta',			
-						'lastUpdate': '15 Okt 2025, 14:30'            
+        'orders', IFNULL((
+            SELECT JSON_ARRAYAGG(order_data)
+            FROM (
+                SELECT JSON_OBJECT(
+                    'tripId', t.awb_no,
+                    'route', CONCAT(x.city_name, ' → ', y.city_name),
+                    'pickupDate', DATE_FORMAT(t.pickup_date, '%d %b %Y'),
+                    'status', t.last_status,
+
+                    'lastLocation', IFNULL(lt.last_location, '-'),
+                    'lastCity', IFNULL(lt.last_city, '-'),
+                    'lastUpdate', IFNULL(
+                        DATE_FORMAT(lt.updated_at, '%d %b %Y, %H:%i'), '-'
                     ),
-					JSON_OBJECT(
-						'StatusName': 'In Progress',
-						'city': 'Banten',
-						'lastLocation': 'Pelabuhan Merak',			
-						'lastUpdate': '16 Okt 2025, 18:10'     
-					),
-					JSON_OBJECT(
-						'StatusName': 'Transit',
-						'city': 'Lampung',
-						'lastLocation': 'Jl. Metro Lampung',			
-						'lastUpdate': '17 Okt 2025, 11:30'
-					),
-					JSON_OBJECT(
-					'StatusName': 'Transit',
-					'city': 'Medan',
-					'lastLocation': 'Jl. Medan Merdeka',			
-					'lastUpdate': '23 Okt 2025, 11:30' 
-					),
-					JSON_OBJECT(
-					'StatusName': 'Process Delivery',
-					'city': 'Medan',
-					'lastLocation': 'Mall Medan',			
-					'lastUpdate': '24 Okt 2025, 08:30'
-					)
-                )
-            ),
-            JSON_OBJECT(
-                'tripId': '444444',
-				'route': 'Jakarta → Medan',
-				'pickupDate': '14 Okt 2025',
-				'status': 'in_progress',
-				'lastLocation': 'Jl. Gatot Subroto, Jakarta',
-				'lastCity': 'Jakarta',
-				'lastUpdate': '15 Okt 2025, 14:30',
-				'deliveryDate' : '24 Okt 2025 15:15',
-				'receipent' : 'Anwar',
-				'contains' : 'Paper Bag',
-				'volume': '33',
-				'JmlColly' : '1',
-                'keterangan' : 'barang DC',
-                'trackings', JSON_ARRAY(
-                    JSON_OBJECT(
-                        'StatusName': 'In Warehouse',
-						'city': 'Jakarta',
-						'lastLocation': 'Jl. Gatot Subroto, Jakarta',			
-						'lastUpdate': '15 Okt 2025, 14:30'            
+                    'tujuan', IFNULL(cb.branch_name,'-'),
+                    'address', IFNULL(cb.address,'-'),
+                    'receipent', IFNULL(lt.recipient, '-'),
+
+                    'deliveryDate', IFNULL(
+                        DATE_FORMAT(t.delivered_date, '%d %b %Y %H:%i'), '-'
                     ),
-					JSON_OBJECT(
-						'StatusName': 'In Progress',
-						'city': 'Banten',
-						'lastLocation': 'Pelabuhan Merak',			
-						'lastUpdate': '16 Okt 2025, 18:10'     
-					),
-					JSON_OBJECT(
-						'StatusName': 'Transit',
-						'city': 'Lampung',
-						'lastLocation': 'Jl. Metro Lampung',			
-						'lastUpdate': '17 Okt 2025, 11:30'
-					),
-					JSON_OBJECT(
-					'StatusName': 'Transit',
-					'city': 'Medan',
-					'lastLocation': 'Jl. Medan Merdeka',			
-					'lastUpdate': '23 Okt 2025, 11:30' 
-					),
-					JSON_OBJECT(
-					'StatusName': 'Process Delivery',
-					'city': 'Medan',
-					'lastLocation': 'Mall Medan',			
-					'lastUpdate': '24 Okt 2025, 08:30'
-					)
-                )
-            ),
-        ),
+                    'contains', IFNULL(t.contains, '-'),
+                    'volume', IFNULL(CAST(t.total_kg AS CHAR), '0'),
+                    'JmlColly', IFNULL(CAST(t.total_colly AS CHAR), '0'),
+                    'keterangan', IFNULL(t.description, '-'),
+
+                    'trackings', IFNULL((
+                        SELECT JSON_ARRAYAGG(
+                            JSON_OBJECT(
+                                'StatusName', th.status_name,
+                                'city', th.last_city,
+                                'lastLocation', th.last_location,
+                                'lastUpdate',
+                                DATE_FORMAT(th.updated_at, '%d %b %Y, %H:%i')
+                            )
+                            ORDER BY th.updated_at ASC
+                        )
+                        FROM order_trackings th
+                        WHERE th.order_number = t.order_number
+                    ), JSON_ARRAY())
+                ) AS order_data
+                FROM orders t
+                LEFT JOIN cities x ON t.origin = x.id
+                LEFT JOIN cities y ON t.destination = y.id
+                LEFT JOIN customer_branchs cb ON t.customer_branch_id = cb.id
+
+                /* ===== LAST TRACKING JOIN ===== */
+                LEFT JOIN (
+                    SELECT ot.*
+                    FROM order_trackings ot
+                    JOIN (
+                        SELECT order_number, MAX(updated_at) AS max_updated
+                        FROM order_trackings
+                        GROUP BY order_number
+                    ) z
+                    ON ot.order_number = z.order_number
+                    AND ot.updated_at = z.max_updated
+                ) lt ON lt.order_number = t.order_number
+                
+                WHERE t.customer_id = p_user_id
+                  AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
+                  AND t.pickup_date >= CURDATE() - INTERVAL 30 DAY 
+
+                ORDER BY t.pickup_date DESC
+                LIMIT v_offset, p_limit
+            ) a
+        ), JSON_ARRAY()),
+
         'pagination', JSON_OBJECT(
             'page', p_page,
             'limit', p_limit,
-            'total', 45,
-            'totalPages', 3
+            'total', v_total,
+            'totalPages', v_total_pages
         )
-    ) as json;
-END//
+    ) AS json_result;
+END
 
 -- SP: Customer Orders List
 DROP PROCEDURE IF EXISTS sp_customer_orders_json//
@@ -305,137 +338,354 @@ BEGIN
 END//
 
 -- SP: Customer Pickup Create
-DROP PROCEDURE IF EXISTS sp_customer_pickup_create_json//
-CREATE PROCEDURE sp_customer_pickup_create_json(
-    IN p_user_id VARCHAR(50),
-    IN p_data_json TEXT
+DROP  PROCEDURE IF EXISTS sp_customer_pickup_create_json;
+CREATE PROCEDURE 'sp_customer_pickup_create_json'(
+	IN 'p_user_id' VARCHAR(50),
+	IN 'p_data_json' TEXT
 )
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
 BEGIN
+    DECLARE v_pickup_id INT;
+    DECLARE v_pickup_code VARCHAR(50);
+    DECLARE v_year VARCHAR(4);
+    DECLARE v_sequence INT;
+    
+    -- Extract JSON fields
+    DECLARE v_customer_name VARCHAR(100);
+    DECLARE v_pickup_address TEXT;
+    DECLARE v_koli INT;
+    DECLARE v_weight_kg DECIMAL(10,2);
+    DECLARE v_description TEXT;
+    DECLARE v_schedule_date DATE;
+    DECLARE v_schedule_time VARCHAR(50);
+    DECLARE v_instructions TEXT;
+    DECLARE v_pic_name VARCHAR(100);
+    DECLARE v_pic_phone VARCHAR(20);
+    DECLARE v_pic_whatsapp TINYINT;
+    DECLARE v_destination_city VARCHAR(100);
+    DECLARE v_destination_address TEXT;
+    
+    -- Parse JSON data
+    SET v_customer_name = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.customer_name'));
+    SET v_pickup_address = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.pickup_address'));
+    SET v_koli = JSON_EXTRACT(p_data_json, '$.item.koli');
+    SET v_weight_kg = JSON_EXTRACT(p_data_json, '$.item.weight_kg');
+    SET v_description = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.item.description'));
+    SET v_schedule_date = STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.schedule.date')),'%d %M %Y');
+    SET v_schedule_time = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.schedule.time_range'));
+    SET v_instructions = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.instructions'));
+    SET v_pic_name = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.pic.name'));
+    SET v_pic_phone = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.pic.phone'));
+    SET v_pic_whatsapp = IFNULL(JSON_EXTRACT(p_data_json, '$.pic.whatsapp'), false);
+    SET v_destination_city = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.destination.city'));
+    SET v_destination_address = JSON_UNQUOTE(JSON_EXTRACT(p_data_json, '$.destination.address'));
+    
+    -- Generate pickup code: #PU-YYYY-NNNNNN
+    SET v_year = YEAR(NOW());
+    
+    -- Get next sequence number for this year
+    SELECT IFNULL(MAX(CAST(SUBSTRING(request_number, 10) AS UNSIGNED)), 0) + 1 
+    INTO v_sequence
+    FROM pickup_requests 
+    WHERE request_number LIKE CONCAT('PU-', v_year, '-%');
+    
+    SET v_pickup_code = CONCAT('PU-', v_year, '-', LPAD(v_sequence, 6, '0'));
+    
+    -- Insert into pickups table
+    INSERT INTO pickup_requests (
+        request_number,
+        user_id,
+        customer_id,
+        address,
+        total_colly,
+        total_volume,
+        description,
+        request_date,
+        request_time,
+        note_admin,
+        pic_name,
+        pic_phone,
+        pic_whatsapp,
+        destination_city,
+        destination_address,
+        last_status,
+        created_at
+    ) VALUES (
+        v_pickup_code,
+        p_user_id,
+        p_user_id,
+        v_pickup_address,
+        v_koli,
+        v_weight_kg,
+        v_description,
+        v_schedule_date,
+        v_schedule_time,
+        v_instructions,
+        v_pic_name,
+        v_pic_phone,
+        v_pic_whatsapp,
+        v_destination_city,
+        v_destination_address,
+        'pending',
+        NOW()
+    );
+    
+    SET v_pickup_id = LAST_INSERT_ID();
+    
+    -- Return created pickup data
     SELECT JSON_OBJECT(
-        'id', '1',
-        'code', CONCAT('#PU-', YEAR(NOW()), '-', LPAD(FLOOR(RAND() * 999999), 6, '0')),
+        'id', CAST(v_pickup_id AS CHAR),
+        'code', v_pickup_code,
         'date', DATE_FORMAT(NOW(), '%d %M %Y, %H:%i'),
         'status', 'pending'
-    ) as json;
-END//
-
--- SP: Customer Pickup History
-DROP PROCEDURE IF EXISTS sp_customer_pickup_history_json//
-CREATE PROCEDURE sp_customer_pickup_history_json(
-    IN p_user_id VARCHAR(50),
-    IN p_status VARCHAR(20),
-    IN p_page INT,
-    IN p_limit INT
-)
-BEGIN
-    SELECT JSON_OBJECT(
-        'pickups', JSON_ARRAY(
-            JSON_OBJECT(
-                'id', '1',
-                'code', '#PU-2024-001234',
-                'date', '15 Januari 2025, 14:30',
-                'customer_name', 'Ahmad Rizki',
-                'pickup_address', 'Jl. Sudirman No. 123, Jakarta Pusat',
-                'schedule_date', '15 Januari 2025',
-                'schedule_time', '14:30',
-                'koli', 2,
-                'weight_kg', 2.5,
-                'weight_display', '2.5 kg',
-                'description', 'Laptop dan charger',
-                'category', 'Elektronik',
-                'status', 'done',
-                'driver', 'Budi Santoso (B 1234 ABC)',
-                'confirmed_koli', 2,
-                'confirmed_at', '15 Januari 2025, 14:45',
-                'pickup_photo', 'https://example.com/photo.jpg'
-            )
-        ),
-        'pagination', JSON_OBJECT(
-            'page', p_page,
-            'limit', p_limit,
-            'total', 10
-        )
-    ) as json;
-END//
+    ) AS json;
+END
 
 -- SP: Customer Pickup Detail
-DROP PROCEDURE IF EXISTS sp_customer_pickup_detail_json//
-CREATE PROCEDURE sp_customer_pickup_detail_json(
-    IN p_user_id VARCHAR(50),
-    IN p_pickup_id VARCHAR(50)
-)
-BEGIN
-    SELECT JSON_OBJECT(
-        'id', p_pickup_id,
-        'code', '#PU-2024-001234',
-        'date', '15 Januari 2025, 14:30',
-        'customer_name', 'Ahmad Rizki',
-        'pickup_address', 'Jl. Sudirman No. 123, Jakarta Pusat',
-        'schedule_date', '15 Januari 2025',
-        'schedule_time', '14:30',
-        'koli', 2,
-        'weight_kg', 2.5,
-        'weight_display', '2.5 kg',
-        'description', 'Laptop dan charger',
-        'category', 'Elektronik',
-        'instructions', 'Rumah cat hijau, sebelah warung',
-        'pic_name', 'Ahmad Rizki',
-        'pic_phone', '081234567890',
-        'pic_whatsapp', true,
-        'destination_city', 'Jakarta',
-        'destination_address', 'Jl. Thamrin No. 456',
-        'status', 'done',
-        'driver', 'Budi Santoso (B 1234 ABC)',
-        'eta', '—',
-        'confirmed_koli', 2,
-        'pickup_photo', 'https://example.com/photo.jpg',
-        'confirmed_at', '15 Januari 2025, 14:45'
-    ) as json;
-END//
+DELIMITER //
 
--- SP: Customer Invoice List
-DROP PROCEDURE IF EXISTS sp_customer_invoice_list_json//
-CREATE PROCEDURE sp_customer_invoice_list_json(
-    IN p_user_id VARCHAR(50),
-    IN p_month INT,
-    IN p_year INT,
-    IN p_status VARCHAR(20),
-    IN p_page INT,
-    IN p_limit INT
+DROP  PROCEDURE IF EXISTS sp_customer_pickup_detail_json;
+CREATE PROCEDURE 'sp_customer_pickup_detail_json'(
+	IN 'p_user_id' VARCHAR(50),
+	IN 'p_pickup_id' VARCHAR(50)
 )
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
 BEGIN
     SELECT JSON_OBJECT(
-        'invoices', JSON_ARRAY(
-            JSON_OBJECT(
-                'id', 'INV-001',
-                'invoiceNumber', 'INV-2025-001',
-                'title', 'Invoice Pengiriman Januari 2025',
-                'amount', 1500000,
-                'date', '01 Jan 2025',
-                'month', 1,
-                'year', 2025,
-                'status', 'paid',
-                'dueDate', '31 Jan 2025'
-            ),
-            JSON_OBJECT(
-                'id', 'INV-002',
-                'invoiceNumber', 'INV-2025-002',
-                'title', 'Invoice Pengiriman Februari 2025',
-                'amount', 2000000,
-                'date', '01 Feb 2025',
-                'month', 2,
-                'year', 2025,
-                'status', 'pending',
-                'dueDate', '28 Feb 2025'
-            )
-        ),
+        'id', CAST(p.id AS CHAR),
+        'code', p.request_number,
+        'date', DATE_FORMAT(p.request_date, '%d %M %Y, %H:%i'),
+        'customer_name', c.customer_name,
+        'pickup_address', p.address,
+        'schedule_date', p.request_date,
+        'schedule_time', p.request_time,
+        'koli', p.total_colly,
+        'weight_kg', p.total_volume,
+        'weight_display', CONCAT(FORMAT(p.total_volume, 1), ' kg'),
+        'description', IFNULL(p.description, '-'),
+        'category', IFNULL(p.category, '-'),
+        'instructions', IFNULL(p.note_admin, '-'),
+        'pic_name', IFNULL(p.pic_name, '-'),
+        'pic_phone', IFNULL(p.pic_phone, '-'),
+        'pic_whatsapp', IFNULL(p.pic_whatsapp, false),
+        'destination_city', IFNULL(p.destination_city, '-'),
+        'destination_address', IFNULL(p.destination_address, '-'),
+        'status', p.last_status,
+        'driver', CASE 
+            WHEN d.id IS NOT NULL THEN CONCAT(d.driver_name, ' (', tr.police_number, ')')
+            ELSE NULL
+        END,
+        'eta', '-',
+        'confirmed_koli', p.colly_real,
+        'pickup_photo', '-', -- p.pickup_photo,
+        'confirmed_at', CASE 
+            WHEN p.realisasi_date IS NOT NULL 
+            THEN DATE_FORMAT(p.realisasi_date, '%d %M %Y, %H:%i')
+            ELSE NULL
+        END
+    ) AS json
+    FROM pickup_requests p
+    LEFT JOIN drivers d ON p.driver_id = d.id
+    LEFT JOIN customers c ON p.customer_id = c.id
+    LEFT JOIN trucks tr ON d.truck_id = tr.id
+    WHERE p.id = p_pickup_id
+      AND p.user_id = p_user_id LIMIT 1;
+END
+
+DELIMITER ;
+
+-- SP : Customer Pickup History
+DELIMITER //
+
+DROP  PROCEDURE IF EXISTS sp_customer_pickup_history_json;
+CREATE PROCEDURE 'sp_customer_pickup_history_json'(
+	IN 'p_user_id' VARCHAR(50),
+	IN 'p_status' VARCHAR(20),
+	IN 'p_page' INT,
+	IN 'p_limit' INT
+)
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
+BEGIN
+    DECLARE v_offset INT DEFAULT 0;
+    DECLARE v_total INT DEFAULT 0;
+    DECLARE v_total_pages INT DEFAULT 0;
+
+    /* ================= SAFETY ================= */
+    IF p_page < 1 THEN SET p_page = 1; END IF;
+    IF p_limit < 1 THEN SET p_limit = 10; END IF;
+
+    SET v_offset = (p_page - 1) * p_limit;
+
+    /* ================= TOTAL DATA ================= */
+    SELECT COUNT(*)
+    INTO v_total
+    FROM pickup_requests p
+    WHERE p.user_id = p_user_id
+      AND p.last_status = IFNULL(NULLIF(p_status, ''), p.last_status);
+
+    SET v_total_pages = CEIL(v_total * 1.0 / p_limit);
+
+    /* ================= MAIN JSON ================= */
+    SELECT JSON_OBJECT(
+        'pickups', IFNULL((
+            SELECT JSON_ARRAYAGG(pickup_data)
+            FROM (
+                SELECT JSON_OBJECT(
+                    'id', CAST(p.id AS CHAR),
+                    'code', p.request_number,
+
+                    /* === DISPLAY FORMAT (boleh pindah FE kalau mau) === */
+                    'date', DATE_FORMAT(p.request_date, '%d %M %Y, %H:%i'),
+
+                    'customer_name', c.customer_name,
+                    'pickup_address', p.address,
+
+                    'schedule_date', p.request_date,
+                    'schedule_time', p.request_time,
+
+                    'koli', p.total_colly,
+                    'weight_kg', p.total_volume,
+                    'weight_display', CONCAT(FORMAT(p.total_volume, 1), ' kg'),
+
+                    'description', IFNULL(p.description, '-'),
+                    'category', IFNULL(p.category, '-'),
+                    'status', p.last_status,
+
+                    'driver',
+                        IF(d.id IS NULL,
+                            NULL,
+                            CONCAT(d.driver_name, ' (', tr.police_number, ')')
+                        ),
+
+                    'confirmed_koli', p.colly_real,
+                    'confirmed_at',
+                        IF(p.realisasi_date IS NULL,
+                            NULL,
+                            DATE_FORMAT(p.realisasi_date, '%d %M %Y, %H:%i')
+                        ),
+
+                    'pickup_photo', '-'
+                ) AS pickup_data
+                FROM pickup_requests p
+                LEFT JOIN customers c ON c.id = p.customer_id
+                LEFT JOIN drivers d ON d.id = p.driver_id
+                LEFT JOIN trucks tr ON tr.id = d.truck_id
+
+                WHERE p.customer_id = p_user_id
+                  AND p.last_status = IFNULL(NULLIF(p_status, ''), p.last_status)
+
+                ORDER BY p.created_at DESC
+                LIMIT v_offset, p_limit
+            ) q
+        ), JSON_ARRAY()),
+
         'pagination', JSON_OBJECT(
             'page', p_page,
             'limit', p_limit,
-            'total', 12
+            'total', v_total,
+            'totalPages', v_total_pages
         )
-    ) as json;
-END//
+    ) AS json_result;
+END
+
+DELIMITER ;
+
+-- SP: Customer Invoice List
+DROP  PROCEDURE IF EXISTS sp_customer_invoice_list_json;
+CREATE DEFINER='root'@'localhost' PROCEDURE 'sp_customer_invoice_list_json'(
+	IN 'p_user_id' VARCHAR(50),
+	IN 'p_month' INT,
+	IN 'p_year' INT,
+	IN 'p_status' VARCHAR(20),
+	IN 'p_page' INT,
+	IN 'p_limit' INT
+)
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
+BEGIN
+    DECLARE v_offset INT DEFAULT 0;
+    DECLARE v_total INT DEFAULT 0;
+    DECLARE v_start_date DATE;
+    DECLARE v_end_date DATE;
+
+    /* ================= SAFETY ================= */
+    IF p_page < 1 THEN SET p_page = 1; END IF;
+    IF p_limit < 1 THEN SET p_limit = 10; END IF;
+
+    SET v_offset = (p_page - 1) * p_limit;
+
+    /* ================= DATE RANGE ================= */
+    IF p_year IS NOT NULL AND p_month IS NOT NULL THEN
+        SET v_start_date = STR_TO_DATE(CONCAT(p_year,'-',p_month,'-01'), '%Y-%m-%d');
+        SET v_end_date   = LAST_DAY(v_start_date);
+    ELSEIF p_year IS NOT NULL THEN
+        SET v_start_date = STR_TO_DATE(CONCAT(p_year,'-01-01'), '%Y-%m-%d');
+        SET v_end_date   = STR_TO_DATE(CONCAT(p_year,'-12-31'), '%Y-%m-%d');
+    ELSE
+        SET v_start_date = NULL;
+        SET v_end_date   = NULL;
+    END IF;
+
+    /* ================= TOTAL ================= */
+    SELECT COUNT(*)
+    INTO v_total
+    FROM invoices i
+    WHERE i.customer_id = p_user_id
+      AND i.last_status = IFNULL(NULLIF(p_status,''), i.last_status)
+      AND (
+            v_start_date IS NULL
+            OR i.invoice_date BETWEEN v_start_date AND v_end_date
+          );
+
+    /* ================= MAIN JSON ================= */
+    SELECT JSON_OBJECT(
+        'invoices', IFNULL((
+            SELECT JSON_ARRAYAGG(invoice_data)
+            FROM (
+                SELECT JSON_OBJECT(
+                    'id', i.id,
+                    'invoiceNumber', i.invoice_number,
+                    'title', i.notes,
+                    'amount', i.grand_total,
+                    'date', DATE_FORMAT(i.invoice_date, '%d %b %Y'),
+                    'month', MONTH(i.invoice_date),
+                    'year', YEAR(i.invoice_date),
+                    'status', i.last_status,
+                    'dueDate', DATE_FORMAT(i.due_date, '%d %b %Y')
+                ) AS invoice_data
+                FROM invoices i
+                WHERE i.customer_id = p_user_id
+                  AND i.last_status = IFNULL(NULLIF(p_status,''), i.last_status)
+                  AND (
+                        v_start_date IS NULL
+                        OR i.invoice_date BETWEEN v_start_date AND v_end_date
+                      )
+                ORDER BY i.invoice_date DESC
+                LIMIT v_offset, p_limit
+            ) x
+        ), JSON_ARRAY()),
+        'pagination', JSON_OBJECT(
+            'page', p_page,
+            'limit', p_limit,
+            'total', v_total
+        )
+    ) AS json_result;
+END
 
 -- SP: Customer Order History
 DROP PROCEDURE IF EXISTS sp_customer_order_history_json//
