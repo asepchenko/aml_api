@@ -274,7 +274,7 @@ router.get(
   '/orders',
   authRequired,
   [
-    query('status').optional().isIn(['In_Progress', 'Closing']),
+    query('status').optional().isIn(['all','In_Progress', 'Closing']),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 })
   ],
@@ -285,7 +285,7 @@ router.get(
     }
 
     const userId = req.user.sub;
-    const status = req.query.status || 'In_Progress';
+    const status = req.query.status || 'all';
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 

@@ -2160,20 +2160,70 @@ END//
 -- AGENT MODULE (005)
 -- =====================================================
 
+--View : order agent
+CREATE OR REPLACE VIEW v_order_agents AS
+SELECT
+    o.awb_no,
+    oa.order_number,
+    o.pickup_date,
+    oa.agent_id,
+    oa.sequence,
+    o.last_status
+FROM order_agents oa
+LEFT JOIN orders o
+    ON oa.order_number = o.order_number;
+
+
 -- SP: Agent Dashboard
+DELIMITER //
+
 DROP PROCEDURE IF EXISTS sp_agent_dashboard_json//
-CREATE PROCEDURE sp_agent_dashboard_json(
-    IN p_user_id VARCHAR(50)
+CREATE PROCEDURE sp_agent_dashboard_json (
+    IN p_agent_id INT
 )
 BEGIN
-  SELECT JSON_OBJECT(
-        'stats', JSON_ARRAY(
-            JSON_OBJECT('label', 'Diterima', 'value', '24'),
-            JSON_OBJECT('label', 'Dikirim', 'value', '18'),
-            JSON_OBJECT('label', 'Estimasi Pendapatan', 'value', 'Rp 450K')
+    DECLARE v_diterima INT DEFAULT 0;
+    DECLARE v_dikirim INT DEFAULT 0;
+
+    /* ===== DITERIMA (30 HARI TERAKHIR) ===== */
+    SELECT COUNT(*)
+    INTO v_diterima
+    FROM v_order_agents
+    WHERE agent_id = p_agent_id
+      AND last_status = 'On Process Delivery'
+      AND pickup_date >= CURDATE() - INTERVAL 30 DAY;
+
+    /* ===== DIKIRIM (30 HARI TERAKHIR) ===== */
+    SELECT COUNT(*)
+    INTO v_dikirim
+    FROM v_order_agents
+    WHERE agent_id = p_agent_id
+      AND last_status = 'Delivered'
+      AND pickup_date >= CURDATE() - INTERVAL 30 DAY;
+
+    /* ===== FINAL JSON ===== */
+    SELECT JSON_OBJECT(
+        'success', TRUE,
+        'responseCode', '2000500',
+        'responseMessage', 'Data dashboard agent berhasil diambil',
+        'data', JSON_OBJECT(
+            'stats', JSON_ARRAY(
+                JSON_OBJECT(
+                    'label', 'Diterima',
+                    'value', CAST(v_diterima AS CHAR)
+                ),
+                JSON_OBJECT(
+                    'label', 'Dikirim',
+                    'value', CAST(v_dikirim AS CHAR)
+                )
+            )
         )
-    ) as json;
+    ) AS json_result;
+
 END//
+
+DELIMITER ;
+
 
 -- SP: Agent Tasks
 DROP PROCEDURE IF EXISTS sp_agent_tasks_json//
