@@ -1272,75 +1272,122 @@ END//
 -- SP: Driver Location Update
 DROP PROCEDURE IF EXISTS sp_driver_location_update_json//
 CREATE PROCEDURE sp_driver_location_update_json(
-    IN p_user_id VARCHAR(50),
-    IN p_trip_id VARCHAR(50),
-    IN p_latitude DECIMAL(10,6),
-    IN p_longitude DECIMAL(10,6),
-    IN p_address TEXT,
-    IN p_city VARCHAR(100),
-    IN p_region VARCHAR(100),
-    IN p_timestamp DATETIME
+	IN p_user_id VARCHAR(50),
+	IN p_trip_id VARCHAR(50),
+	IN p_latitude DECIMAL(10,6),
+	IN p_longitude DECIMAL(10,6),
+	IN p_address TEXT,
+	IN p_city VARCHAR(100),
+	IN p_region VARCHAR(100),
+	IN p_timestamp DATETIME
 )
-BEGIN
-    DECLARE v_city_id INT;
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
+proc: BEGIN
+    DECLARE v_city_id INT DEFAULT NULL;
+    DECLARE v_trip_number VARCHAR(50);
     DECLARE v_updated_stts JSON;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SELECT JSON_OBJECT('error','UPDATE LOCATION ERROR') AS JSON;
+        RESIGNAL;
+    END;
+
+    /* lookup city (exact match dulu) */
+    SELECT id
+      INTO v_city_id
+    FROM cities
+    WHERE city_name = p_city
+    LIMIT 1;
     
-    -- Ambil city_id berdasarkan nama kota
-    SELECT id INTO v_city_id FROM cities WHERE city_name LIKE CONCAT('%', p_city, '%') LIMIT 1;
+        
+    SELECT tr.trip_number into v_trip_number FROM trips tr WHERE tr.trip_number = p_trip_id AND tr.driver_id = p_user_id
+    LIMIT 1;
+
+    IF v_trip_number IS NULL THEN
+        SELECT JSON_OBJECT('error','not_found');
+            LEAVE proc;
+    END IF;
     
-    -- Update lokasi terakhir di tabel trips
-    UPDATE trips 
-    SET last_location = p_address,
-        last_city = p_city,
-        last_update = p_timestamp,
-        updated_at = NOW()
-    WHERE trip_number = p_trip_id;
-    
-    -- Insert tracking baru "On Process Delivery" untuk semua order dalam trip tersebut
+
+    START TRANSACTION;
+
+    /* update lokasi trip (realtime, aman diupdate sering) */
+    UPDATE trips
+       SET last_location = p_address,
+           last_city = p_city,
+           last_update = p_timestamp,
+           updated_at = NOW()
+     WHERE trip_number = p_trip_id;
+
+    /* 1. Update data tracking jika sudah ada (kota sama & status On Process Delivery) */
+    UPDATE order_trackings ot
+    JOIN manifest_details md ON ot.order_number = md.order_number
+    JOIN trip_details td ON md.manifest_number = td.manifest_number
+    SET ot.updated_at = NOW(),
+        ot.status_date = p_timestamp,
+        ot.last_location = CONCAT(p_address, ' (', p_latitude, ', ', p_longitude, ')')
+    WHERE td.trip_number = p_trip_id
+      AND ot.status_name = 'On Process Delivery'
+      AND ot.last_city = p_city;
+
+    /* 2. Insert tracking baru jika belum ada untuk kota tersebut */
     INSERT INTO order_trackings (
-        order_number, 
-        status_date, 
-        status_name, 
-        city_id, 
-        description, 
-        user_id, 
-        created_at, 
+        order_number,
+        status_date,
+        status_name,
+        city_id,
+        last_location,
+        last_city,
+        user_id,
+        created_at,
         updated_at
     )
-    SELECT 
-        md.order_number, 
-        p_timestamp, 
-        'On Process Delivery', 
-        v_city_id, 
-        CONCAT(p_address, ' (', p_latitude, ', ', p_longitude, ')'), 
-        p_user_id, 
-        NOW(), 
+    SELECT
+        md.order_number,
+        p_timestamp,
+        'On Process Delivery',
+        v_city_id,
+        CONCAT(p_address, ' (', p_latitude, ', ', p_longitude, ')'),
+        p_city,
+        p_user_id,
+        NOW(),
         NOW()
     FROM trip_details td
     JOIN manifest_details md ON td.manifest_number = md.manifest_number
-    WHERE td.trip_number = p_trip_id;
-    
-    -- Update status terakhir di tabel orders
+    LEFT JOIN order_trackings ot 
+        ON ot.order_number = md.order_number 
+        AND ot.status_name = 'On Process Delivery' 
+        AND ot.last_city = p_city
+    WHERE td.trip_number = p_trip_id
+      AND ot.id IS NULL; -- Hanya insert jika tidak ditemukan matching record sebelumnya
+
+    /* update order status hanya jika belum sama */
     UPDATE orders o
     JOIN manifest_details md ON o.order_number = md.order_number
     JOIN trip_details td ON md.manifest_number = td.manifest_number
     SET o.last_status = 'On Process Delivery',
         o.updated_at = NOW()
+    WHERE td.trip_number = p_trip_id
+      AND o.last_status <> 'On Process Delivery';
+
+    /* kumpulkan STT */
+    SELECT JSON_ARRAYAGG(DISTINCT o.awb_no)
+      INTO v_updated_stts
+    FROM orders o
+    JOIN manifest_details md ON o.order_number = md.order_number
+    JOIN trip_details td ON md.manifest_number = td.manifest_number
     WHERE td.trip_number = p_trip_id;
 
-    -- Ambil daftar STT (awb_no) yang diupdate untuk dikembalikan dalam response
-    SELECT JSON_ARRAYAGG(awb_no) INTO v_updated_stts
-    FROM (
-        SELECT DISTINCT o.awb_no
-        FROM orders o
-        JOIN manifest_details md ON o.order_number = md.order_number
-        JOIN trip_details td ON md.manifest_number = td.manifest_number
-        WHERE td.trip_number = p_trip_id
-    ) AS tmp;
+    COMMIT;
 
-    -- Return response sesuai format dokumentasi
     SELECT JSON_OBJECT(
-        'success', true,
+        'success', TRUE,
         'responseCode', '2000300',
         'responseMessage', 'Location berhasil diupdate',
         'data', JSON_OBJECT(
@@ -1355,8 +1402,9 @@ BEGIN
             ),
             'updated_stts', IFNULL(v_updated_stts, JSON_ARRAY())
         )
-    ) as json;
-END//
+    ) AS json;
+
+END
 
 -- SP: Driver Notifications
 DELIMITER //

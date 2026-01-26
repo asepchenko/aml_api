@@ -24,17 +24,16 @@ router.get(
 );
 
 /**
- * GET /api/agent/tasks
+ * GET /api/agent/orders
  * Mendapatkan daftar tasks untuk agent
  * SP: sp_agent_tasks_json(p_user_id, p_type, p_status, p_priority, p_page, p_limit)
  */
 router.get(
-  '/tasks',
+  '/orders',
   authRequired,
   [
-    query('type').optional().isIn(['pickup', 'delivery', 'all']),
-    query('status').optional().isIn(['pending', 'in_progress', 'completed']),
-    query('priority').optional().isIn(['low', 'medium', 'high']),
+    // query('type').optional().isIn(['pickup', 'delivery', 'all']),
+    query('status').optional().isIn(['Open', 'On Process Delivery', 'Delivered']),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 })
   ],
@@ -45,15 +44,13 @@ router.get(
     }
 
     const userId = req.user.sub;
-    const type = req.query.type || null;
     const status = req.query.status || null;
-    const priority = req.query.priority || null;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const data = await callJsonSP('sp_agent_tasks_json', [userId, type, status, priority, page, limit]);
-    if (!data) return notFound(res, 'Data tasks tidak ditemukan', MOD);
-    return ok(res, data, 'Daftar tasks berhasil diambil', MOD);
+    const data = await callJsonSP('sp_agent_order_json', [userId, status, page, limit]);
+    if (!data) return notFound(res, 'Data Order tidak ditemukan', MOD);
+    return ok(res, data, 'Daftar Order berhasil diambil', MOD);
   })
 );
 
@@ -106,18 +103,54 @@ router.put(
 );
 
 /**
- * POST /api/agent/scan
- * Scan barcode untuk penerimaan atau pengiriman
- * SP: sp_agent_scan_json(p_user_id, p_barcode, p_scan_type, p_latitude, p_longitude)
+ * GET /api/agent/stts/:sttNumber/kolis
+ * Mendapatkan daftar koli dari STT tertentu (Versi Driver)
+ * SP: sp_driver_stt_kolis_json(p_stt_number, p_trip_id, p_manifest_id)
  */
-router.post(
-  '/scan',
+router.get(
+  '/stts/:sttNumber/kolis',
   authRequired,
   [
-    body('barcode').isString().notEmpty().withMessage('barcode wajib diisi'),
-    body('scan_type').isIn(['receive', 'send']).withMessage('scan_type harus receive atau send'),
-    body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
-    body('longitude').isFloat().withMessage('longitude wajib berupa angka')
+    param('sttNumber').notEmpty().withMessage('sttNumber wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const { sttNumber } = req.params;
+
+    try {
+      const data = await callJsonSP('sp_agent_stt_kolis_json', [sttNumber]);
+      
+      if (!data) {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'stt_not_found') {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      return ok(res, data, 'Daftar koli berhasil diambil', MOD);
+    } catch (err) {
+      console.error('[AGENT STT KOLIS ERROR]', err);
+      return bad(res, 'Gagal mengambil data koli', 500, MOD, SPECIFIC.ERROR);
+    }
+  })
+);
+
+/**
+ * POST /api/driver/scan/koli
+ * Scan koli barcode (auto-detect STT dari koli ID)
+ * SP: sp_agent_scan_koli_json(p_user_id, p_stt_number, p_koli_id, p_city_name, p_last_location)
+ */
+router.post(
+  '/scan/koli',
+  authRequired,
+  [
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
   ],
   asyncRoute(async (req, res) => {
     const errors = validationResult(req);
@@ -126,13 +159,76 @@ router.post(
     }
 
     const userId = req.user.sub;
-    const { barcode, scan_type, latitude, longitude } = req.body;
+    const { sttNumber, koliId } = req.body;
 
-    const data = await callJsonSP('sp_agent_scan_json', [userId, barcode, scan_type, latitude, longitude]);
-    if (!data) return bad(res, 'Gagal scan barcode', 400, MOD, SPECIFIC.INVALID);
+    try {
+      const data = await callJsonSP('sp_agent_scan_koli_json', [userId, sttNumber, koliId]);
+      
+      if (!data) {
+        return notFound(res, 'STT tidak ditemukan', MOD);
+      }
+
+      if (data.error === 'not_found') {
+        return bad(res, `Koli ${koliId} tidak ditemukan di STT ${sttNumber}`, 400, MOD, SPECIFIC.NOT_FOUND);
+      }
+
+      if (data.error === 'already_scanned') {
+        return bad(res, `Koli ${koliId} sudah pernah di-scan sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+      }
+
+      const message = `Koli ${koliId} berhasil di-scan. (${data.scannedCount}/${data.totalCount} koli)`;
+      return ok(res, data, message, MOD);
+    } catch (err) {
+      console.error('[DELIVERY SCAN ERROR]', err);
+      return bad(res, 'Gagal scan koli', 500, MOD, SPECIFIC.ERROR);
+    }
+  })
+);
+/**
+ * POST /api/agent/delivery/:id/confirm
+ * Driver konfirmasi dengan koli dan foto
+ * SP: sp_agent_delivery_confirm_json(p_user_id, p_stt_number, p_confirmed_koli, p_photo_url, p_recipient_name, p_driver_name)
+ * p_driver_name : Manual input nama driver
+*/
+router.post(
+  '/delivery/:sttnumber/confirm',
+  authRequired,
+  [
+    param('sttnumber').isString().notEmpty(),    
+    body('address').isString().notEmpty().withMessage('address wajib diisi'),
+    body('city').isString().notEmpty().withMessage('city wajib diisi'),
+
+  ],
+  asyncRoute(async (req, res) => {
+    const userId = req.user.sub;
+    const { sttnumber } = req.params;
+    const confirmedKoli = parseInt(req.body.confirmed_koli) || 0;    
+    const recipientName = req.body.recipient_name || null;
+    const driverName = req.body.driver_name || null;
+    const address = req.body.address || null;
+    const city = req.body.city || null;
+    const photoBase64 = req.body.photo; // Base64 string from body
+
+    const data = await callJsonSP('sp_agent_delivery_confirm_json', [userId, sttnumber, confirmedKoli, photoBase64, recipientName, driverName, address, city]);
     
-    const message = scan_type === 'receive' ? 'Paket berhasil diterima' : 'Paket berhasil dikirim';
-    return ok(res, data, message, MOD);
+    if (!data) {
+      return bad(res, 'Gagal konfirmasi pickup', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    // Handle error responses from SP
+    if (data.error === 'not_found') {
+      return notFound(res, 'Stt Number tidak ditemukan', MOD);
+    }
+
+    if (data.error === 'already_delivered') {
+      return bad(res, 'Stt Number sudah dikonfirmasi sebelumnya', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'not_ready') {
+      return bad(res, 'Stt tidak ada dalam task anda', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    return ok(res, data, 'Delivery berhasil dikonfirmasi', MOD);
   })
 );
 
