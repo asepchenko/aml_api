@@ -509,6 +509,8 @@ DROP  PROCEDURE IF EXISTS sp_customer_pickup_history_json;
 CREATE PROCEDURE 'sp_customer_pickup_history_json'(
 	IN 'p_user_id' VARCHAR(50),
 	IN 'p_status' VARCHAR(20),
+	IN 'p_start_date' DATE,
+	IN 'p_end_date' DATE,
 	IN 'p_page' INT,
 	IN 'p_limit' INT
 )
@@ -533,7 +535,9 @@ BEGIN
     INTO v_total
     FROM pickup_requests p
     WHERE p.user_id = p_user_id
-      AND p.last_status = IFNULL(NULLIF(p_status, ''), p.last_status);
+      AND p.last_status = IFNULL(NULLIF(p_status, ''), p.last_status)
+      AND (p_start_date IS NULL OR DATE(p.request_date) >= p_start_date)
+      AND (p_end_date IS NULL OR DATE(p.request_date) <= p_end_date);
 
     SET v_total_pages = CEIL(v_total * 1.0 / p_limit);
 
@@ -585,6 +589,8 @@ BEGIN
 
                 WHERE p.customer_id = p_user_id
                   AND p.last_status = IFNULL(NULLIF(p_status, ''), p.last_status)
+                  AND (p_start_date IS NULL OR DATE(p.request_date) >= p_start_date)
+                  AND (p_end_date IS NULL OR DATE(p.request_date) <= p_end_date)
 
                 ORDER BY p.created_at DESC
                 LIMIT v_offset, p_limit

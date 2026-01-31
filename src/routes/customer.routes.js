@@ -150,7 +150,9 @@ router.get(
   '/pickup/history',
   authRequired,
   [
-    query('status').optional().isIn(['pending', 'in_progress', 'done', 'canceled']),
+    query('status').optional().isIn(['pending', 'accept', 'done', 'canceled']),
+    query('start_date').optional().isString(),
+    query('end_date').optional().isString(),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 })
   ],
@@ -162,10 +164,19 @@ router.get(
 
     const userId = req.user.sub;
     const status = req.query.status || null;
+    const startDate = req.query.start_date || null;
+    const endDate = req.query.end_date || null;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const data = await callJsonSP('sp_customer_pickup_history_json', [userId, status, page, limit]);
+    const data = await callJsonSP('sp_customer_pickup_history_json', [
+      userId,
+      status,
+      startDate,
+      endDate,
+      page,
+      limit
+    ]);
     if (!data) return notFound(res, 'Data pickup history tidak ditemukan', MOD);
     return ok(res, data, 'History pickup berhasil diambil', MOD);
   })
