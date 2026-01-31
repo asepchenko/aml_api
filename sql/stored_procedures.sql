@@ -1406,6 +1406,145 @@ proc: BEGIN
 
 END
 
+
+-- SP : Driver Manifest Closed
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS sp_driver_manifest_closed_json;
+CREATE DEFINER=root@localhost PROCEDURE sp_driver_manifest_closed_json(
+	IN p_user_id VARCHAR(50),
+	IN p_trip_id VARCHAR(50),
+	IN p_manifest VARCHAR(50),
+	IN p_latitude DECIMAL(10,6),
+	IN p_longitude DECIMAL(10,6),
+	IN p_address TEXT,
+	IN p_city VARCHAR(100),
+	IN p_region VARCHAR(100),
+	IN p_timestamp DATETIME
+)
+LANGUAGE SQL
+NOT DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
+proc: BEGIN
+    DECLARE v_city_id INT DEFAULT NULL;
+    DECLARE v_trip_number VARCHAR(50);
+    DECLARE v_updated_stts JSON;
+
+    /* ===== ERROR HANDLER ===== */
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SELECT JSON_OBJECT(
+            'success', FALSE,
+            'responseCode', '5000300',
+            'responseMessage', 'UPDATE MANIFEST ERROR'
+        ) AS json;
+    END;
+
+    /* ===== VALIDASI TRIP ===== */
+    SELECT tr.trip_number
+      INTO v_trip_number
+    FROM trips tr
+    WHERE tr.trip_number = p_trip_id
+      AND tr.driver_id = p_user_id
+    LIMIT 1;
+
+    IF v_trip_number IS NULL THEN
+        SELECT JSON_OBJECT(
+            'success', FALSE,
+            'responseCode', '4040300',
+            'responseMessage', 'Trip tidak ditemukan'
+        ) AS json;
+        LEAVE proc;
+    END IF;
+
+    /* ===== LOOKUP CITY ===== */
+    SELECT id
+      INTO v_city_id
+    FROM cities
+    WHERE city_name = p_city
+    LIMIT 1;
+
+    START TRANSACTION;
+
+    /* 1. Update table manifests */
+    UPDATE manifests
+    SET last_status = 'Closing',
+        last_tracking = 'Delivered',
+        last_location = p_address,
+        last_city = p_city,
+        updated_at = NOW()
+    WHERE manifest_number = p_manifest;
+
+    /* 2. Insert tracking baru untuk order di manifest LAIN (selain yang sedang di closing) */
+    INSERT INTO order_trackings (
+        order_number,
+        status_date,
+        status_name,
+        city_id,
+        last_location,
+        last_city,
+        user_id,
+        created_at,
+        updated_at
+    )
+    SELECT
+        md.order_number,
+        p_timestamp,
+        'On Process Delivery',
+        v_city_id,
+        CONCAT(p_address, ' (', p_latitude, ', ', p_longitude, ')'),
+        p_city,
+        p_user_id,
+        NOW(),
+        NOW()
+    FROM trip_details td
+    JOIN manifest_details md ON td.manifest_number = md.manifest_number
+    LEFT JOIN order_trackings ot
+      ON ot.order_number = md.order_number
+     AND ot.last_city = p_city
+     AND ot.status_name = 'On Process Delivery'
+    WHERE td.trip_number = p_trip_id
+      AND td.manifest_number <> p_manifest  -- KECUALI manifest yang di-closing
+      AND ot.id IS NULL; -- Anti Duplikat
+
+    /* kumpulkan STT yang ada di trip ini */
+    SELECT JSON_ARRAYAGG(DISTINCT o.awb_no)
+      INTO v_updated_stts
+    FROM orders o
+    JOIN manifest_details md ON o.order_number = md.order_number
+    JOIN trip_details td ON md.manifest_number = td.manifest_number
+    WHERE td.trip_number = p_trip_id;
+
+    COMMIT;
+
+    /* ===== RESPONSE JSON ===== */
+    SELECT JSON_OBJECT(
+        'success', TRUE,
+        'responseCode', '2000300',
+        'responseMessage', 'Manifest berhasil di-closing',
+        'data', JSON_OBJECT(
+            'trip_id', p_trip_id,
+            'manifest_number', p_manifest,
+            'location', JSON_OBJECT(
+                'latitude', p_latitude,
+                'longitude', p_longitude,
+                'address', p_address,
+                'city', p_city,
+                'region', p_region,
+                'timestamp', DATE_FORMAT(p_timestamp, '%Y-%m-%dT%H:%i:%sZ')
+            ),
+            'updated_stts', IFNULL(v_updated_stts, JSON_ARRAY())
+        )
+    ) AS json;
+
+END //
+
+DELIMITER ;
+
+
 -- SP: Driver Notifications
 DELIMITER //
 

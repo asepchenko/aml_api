@@ -562,6 +562,56 @@ router.post(
 );
 
 /**
+ * POST /api/driver/manifest/closed
+ * Untuk closed salah satu manifest di trip, dan update status pengiriman last location ke semua stt pada trip yg manifestnya belum closed.
+ * SP: sp_driver_manifest_closed_json(p_user_id, p_trip_id, p_manifest, p_last_location,p_city)
+ */
+router.post(
+  '/location/update',
+  authRequired,
+  [
+    body('trip_id').isString().notEmpty().withMessage('trip_id wajib diisi'),
+    body('manifest').isString().notEmpty().withMessage('manifest wajib diisi'),
+    body('address').isString().notEmpty().withMessage('address wajib diisi'),
+    body('city').isString().notEmpty().withMessage('city wajib diisi'),
+    body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
+    body('longitude').isFloat().withMessage('longitude wajib berupa angka'),
+    body('timestamp').isString().notEmpty().withMessage('timestamp wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { trip_id, manifest, address, city, latitude, longitude, timestamp } = req.body;
+    try{
+      const data = await callJsonSP('sp_driver_manifest_closed_json', [
+        userId, 
+        trip_id,
+        manifest,
+        address,
+        city,latitude,longitude,
+        timestamp
+      ]);
+      if (data.error === 'not_found') {
+        return bad(res, `Data Trip ${manifest} tidak ditemukan`, 400, MOD, SPECIFIC.NOT_FOUND);
+      }
+  
+      // if (data.error === 'already_hold') {
+      //   return bad(res, `STT ${stt_number} sudah pernah di-hold sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+      // }
+       // if (!data) return bad(res, 'Gagal update location', 400, MOD, SPECIFIC.INVALID);
+      return ok(res, data, 'Closed Manifest Success, Location berhasil diupdate', MOD);
+    } catch (err) {
+      console.error('[CLOSED MANIFEST ERROR]', err);
+      return bad(res, 'Gagal update location', 500, MOD, SPECIFIC.ERROR);
+    }    
+  })
+);
+
+/**
  * GET /api/driver/notifications
  * Mendapatkan daftar notifikasi driver
  * SP: sp_driver_notifications_json(p_user_id, p_is_read, p_type, p_page, p_limit)
