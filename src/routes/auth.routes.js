@@ -34,7 +34,8 @@ router.post(
   loginLimiter,
   [
     body('username').isString().notEmpty().withMessage('username wajib diisi'),
-    body('password').isString().isLength({ min: 4 }).withMessage('password minimal 4 karakter')
+    body('password').isString().isLength({ min: 4 }).withMessage('password minimal 4 karakter'),
+    body('platform').optional().isIn(['ios', 'android'])
   ],
    asyncRoute(async (req, res) => {
   const errors = validationResult(req);
@@ -43,12 +44,12 @@ router.post(
       return bad(res, errors.array()[0].msg, 422, MOD, SPECIFIC.INVALID);
   }
 
-    const { username, password } = req.body;
+    const { username, password, platform } = req.body;
     console.log(`[LOGIN] 🔹 Incoming login attempt: ${username}`);
 
   try {
-      console.log(`[LOGIN] 🌀 Calling SP: sp_user_login_json('${username}')`);
-      const result = await callJsonSP('sp_user_login_json', [username]);
+      console.log(`[LOGIN] 🌀 Calling SP: sp_user_login_json('${username}', '${platform}')`);
+      const result = await callJsonSP('sp_user_login_json', [username, platform]);
     console.log('[LOGIN] 🧩 SP raw result:', result);
 
       const user = result?.user;

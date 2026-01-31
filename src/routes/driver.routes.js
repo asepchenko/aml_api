@@ -4,6 +4,7 @@ import multer from 'multer';
 import { authRequired } from '../middleware/auth.js';
 import { callJsonSP } from '../db.js';
 import { ok, bad, notFound, MODULE, SPECIFIC, asyncRoute } from '../utils/http.js';
+import { sendPushNotification } from '../utils/pushNotifications.js';
 
 // Reverse geocoding using OpenStreetMap Nominatim API
 const reverseGeocode = async (latitude, longitude) => {
@@ -161,6 +162,17 @@ router.put(
       return bad(res, 'Pickup sudah diambil driver lain', 400, MOD, SPECIFIC.INVALID);
     }
 
+    // Notify driver about successful assignment
+    await sendPushNotification(
+      email,
+      'Pickup Diterima',
+      `Anda telah berhasil menerima pickup request #${id}`,
+      {
+        type: 'pickup_assigned',
+        pickupId: id
+      }
+    );
+
     return ok(res, data, 'Pickup request berhasil diterima', MOD);
   })
 );
@@ -184,12 +196,26 @@ router.put(
       return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
     }
 
-    const userId = req.user.sub;
+    const email = req.user.email;
     const { id } = req.params;
     const { status, eta } = req.body;
 
     const data = await callJsonSP('sp_driver_pickup_status_update_json', [userId, id, status, eta || null]);
     if (!data) return bad(res, 'Gagal update status pickup', 400, MOD, SPECIFIC.INVALID);
+
+    // Notify user/customer about status update if needed
+    // For now, let's notify the driver themselves as a confirmation
+    await sendPushNotification(
+      email,
+      'Status Pickup Diperbarui',
+      `Status pickup #${id} sekarang: ${status}`,
+      {
+        type: 'order_update',
+        pickupId: id,
+        status: status
+      }
+    );
+
     return ok(res, data, 'Status pickup berhasil diupdate', MOD);
   })
 );

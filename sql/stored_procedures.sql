@@ -2620,6 +2620,25 @@ BEGIN
     ) as json;
 END//
 
+-- SP: Register device token
+DROP PROCEDURE IF EXISTS sp_device_register_json//
+CREATE PROCEDURE sp_device_register_json(
+    IN p_user_id VARCHAR(255),
+    IN p_token TEXT,
+    IN p_platform VARCHAR(10)
+)
+BEGIN
+    INSERT INTO device_tokens (user_id, token, platform, is_active) 
+    VALUES (p_user_id, p_token, p_platform, TRUE) 
+    ON DUPLICATE KEY UPDATE platform = VALUES(platform), is_active = TRUE, updated_at = CURRENT_TIMESTAMP;
+
+    SELECT JSON_OBJECT(
+        'token', p_token,
+        'platform', p_platform,
+        'registeredAt', CURRENT_TIMESTAMP
+    ) as json;
+END//
+
 DELIMITER ;
 
 -- =====================================================

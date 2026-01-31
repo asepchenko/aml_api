@@ -3,6 +3,8 @@ import { body, query, param, validationResult } from 'express-validator';
 import { authRequired } from '../middleware/auth.js';
 import { callJsonSP } from '../db.js';
 import { ok, created, bad, notFound, MODULE, SPECIFIC, asyncRoute } from '../utils/http.js';
+import { sendPushNotification } from '../utils/pushNotifications.js';
+import { getPool } from '../db.js';
 
 const router = Router();
 const MOD = MODULE.CUSTOMER;
@@ -113,6 +115,28 @@ router.post(
 
     const data = await callJsonSP('sp_customer_pickup_create_json', [userId, pickupData]);
     if (!data) return bad(res, 'Gagal membuat pickup request', 400, MOD, SPECIFIC.INVALID);
+
+    // Notify all drivers about the new pickup request
+    try {
+      const pool = getPool();
+      const [drivers] = await pool.query("SELECT email FROM users WHERE role = 'driver'");
+      for (const driver of drivers) {
+        await sendPushNotification(
+          driver.email,
+          'Pickup Baru',
+          `Ada request pickup baru dari ${req.body.customer_name}`,
+          {
+            type: 'pickup_new',
+            pickupId: data.id || data.pickup_id, // Adjust based on SP return
+            customerName: req.body.customer_name,
+            address: req.body.pickup_address
+          }
+        );
+      }
+    } catch (pushError) {
+      console.error('[PUSH] Error notifying drivers:', pushError);
+    }
+
     return created(res, data, 'Pickup request berhasil dibuat', MOD);
   })
 );

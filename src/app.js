@@ -13,6 +13,7 @@ import driverRoutes from './routes/driver.routes.js';
 import loadingRoutes from './routes/loading.routes.js';
 import agentRoutes from './routes/agent.routes.js';
 import trackingRoutes from './routes/tracking.routes.js';
+import deviceRoutes from './routes/device.routes.js';
 
 dotenv.config();
 
@@ -79,6 +80,7 @@ app.use('/api/driver', driverRoutes);
 app.use('/api/loading', loadingRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/tracking', trackingRoutes);
+app.use('/api/device', deviceRoutes);
 
 // 404 handler
 app.use((req, res, next) => {
