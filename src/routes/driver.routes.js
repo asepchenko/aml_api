@@ -83,7 +83,7 @@ router.get(
   '/pickup',
   authRequired,
   [
-    query('status').optional().isIn(['pending', 'in_progress', 'done']),
+    query('status').optional().isIn(['pending', 'accept', 'done']),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 })
   ],
@@ -593,15 +593,14 @@ router.post(
  * SP: sp_driver_manifest_closed_json(p_user_id, p_trip_id, p_manifest, p_last_location,p_city)
  */
 router.post(
-  '/location/update',
+  '/manifest/closed',
   authRequired,
   [
     body('trip_id').isString().notEmpty().withMessage('trip_id wajib diisi'),
     body('manifest').isString().notEmpty().withMessage('manifest wajib diisi'),
     body('address').isString().notEmpty().withMessage('address wajib diisi'),
     body('city').isString().notEmpty().withMessage('city wajib diisi'),
-    body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
-    body('longitude').isFloat().withMessage('longitude wajib berupa angka'),
+    body('region').isString().notEmpty().withMessage('Region wajib diisi'),
     body('timestamp').isString().notEmpty().withMessage('timestamp wajib diisi')
   ],
   asyncRoute(async (req, res) => {
@@ -611,14 +610,15 @@ router.post(
     }
 
     const userId = req.user.sub;
-    const { trip_id, manifest, address, city, latitude, longitude, timestamp } = req.body;
+    const { trip_id, manifest, address, city, region, latitude, longitude, timestamp } = req.body;
     try{
       const data = await callJsonSP('sp_driver_manifest_closed_json', [
         userId, 
         trip_id,
         manifest,
         address,
-        city,latitude,longitude,
+        city,
+        region,
         timestamp
       ]);
       if (data.error === 'not_found') {
