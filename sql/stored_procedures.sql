@@ -143,7 +143,12 @@ BEGIN
     INTO v_total
     FROM orders t
     WHERE t.customer_id = p_user_id
-      AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
+      AND (
+          (p_status IS NULL OR p_status = '')
+          OR (p_status = 'On Delivery' AND t.last_status = 'On Progress Delivery')
+          OR (p_status = 'Processing' AND t.last_status NOT IN ('On Progress Delivery', 'Delivered'))
+          OR (p_status NOT IN ('On Delivery', 'Processing') AND t.last_status = p_status)
+      )
       AND (p_start_date IS NULL OR t.pickup_date >= p_start_date)
       AND (p_end_date IS NULL OR t.pickup_date <= p_end_date)
       AND (p_start_date IS NOT NULL OR p_end_date IS NOT NULL OR t.pickup_date >= CURDATE() - INTERVAL 30 DAY);
@@ -213,7 +218,12 @@ BEGIN
                 ) lt ON lt.order_number = t.order_number
                 
                 WHERE t.customer_id = p_user_id
-                  AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
+                  AND (
+                      (p_status IS NULL OR p_status = '')
+                      OR (p_status = 'On Delivery' AND t.last_status = 'On Progress Delivery')
+                      OR (p_status = 'Processing' AND t.last_status NOT IN ('On Progress Delivery', 'Delivered'))
+                      OR (p_status NOT IN ('On Delivery', 'Processing') AND t.last_status = p_status)
+                  )
                   AND (p_start_date IS NULL OR t.pickup_date >= p_start_date)
                   AND (p_end_date IS NULL OR t.pickup_date <= p_end_date)
                   AND (p_start_date IS NOT NULL OR p_end_date IS NOT NULL OR t.pickup_date >= CURDATE() - INTERVAL 30 DAY)
