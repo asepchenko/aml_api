@@ -34,7 +34,7 @@ router.get(
   '/orders',
   authRequired,
   [
-    query('status').optional().isIn(['On Process Delivery', 'Delivered']),
+    query('status').optional().isIn(['Pending','On Process Delivery', 'Delivered']),
     query('start_date').optional().isString(),
     query('end_date').optional().isString(),
     query('page').optional().isInt({ min: 1 }),
