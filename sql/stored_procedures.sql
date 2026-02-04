@@ -112,12 +112,16 @@ BEGIN
 END
 
 -- SP: Customer Orders List
-DROP  PROCEDURE IF EXISTS sp_customer_orders_json;
-CREATE PROCEDURE 'sp_customer_orders_json'(
-	IN 'p_user_id' VARCHAR(50),
-	IN 'p_status' VARCHAR(20),
-	IN 'p_page' INT,
-	IN 'p_limit' INT
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS sp_customer_orders_json;
+CREATE  PROCEDURE sp_customer_orders_json(
+	IN p_user_id VARCHAR(50),
+	IN p_status VARCHAR(20),
+	IN p_start_date DATE,
+	IN p_end_date DATE,
+	IN p_page INT,
+	IN p_limit INT
 )
 LANGUAGE SQL
 NOT DETERMINISTIC
@@ -140,7 +144,9 @@ BEGIN
     FROM orders t
     WHERE t.customer_id = p_user_id
       AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
-      AND t.pickup_date >= CURDATE() - INTERVAL 30 DAY;
+      AND (p_start_date IS NULL OR t.pickup_date >= p_start_date)
+      AND (p_end_date IS NULL OR t.pickup_date <= p_end_date)
+      AND (p_start_date IS NOT NULL OR p_end_date IS NOT NULL OR t.pickup_date >= CURDATE() - INTERVAL 30 DAY);
    
 
     SET v_total_pages = CEIL(v_total * 1.0 / p_limit);
@@ -208,7 +214,9 @@ BEGIN
                 
                 WHERE t.customer_id = p_user_id
                   AND (p_status IS NULL OR p_status = '' OR t.last_status = p_status)
-                  AND t.pickup_date >= CURDATE() - INTERVAL 30 DAY 
+                  AND (p_start_date IS NULL OR t.pickup_date >= p_start_date)
+                  AND (p_end_date IS NULL OR t.pickup_date <= p_end_date)
+                  AND (p_start_date IS NOT NULL OR p_end_date IS NOT NULL OR t.pickup_date >= CURDATE() - INTERVAL 30 DAY)
 
                 ORDER BY t.pickup_date DESC
                 LIMIT v_offset, p_limit
@@ -222,65 +230,10 @@ BEGIN
             'totalPages', v_total_pages
         )
     ) AS json_result;
-END
+END //
 
--- SP: Customer Orders List
-DROP PROCEDURE IF EXISTS sp_customer_orders_json//
-CREATE PROCEDURE sp_customer_orders_json(
-    IN p_user_id VARCHAR(50),
-    IN p_status VARCHAR(20),
-    IN p_page INT,
-    IN p_limit INT
-)
-BEGIN
-    SELECT JSON_OBJECT(
-        'orders', JSON_ARRAY(
-            JSON_OBJECT(
-                'tripId', 'TRIP0001',
-                'route', 'Jakarta → Medan',
-                'status', 'in_progress',
-                'driverName', 'Rudi Hartono',
-                'truckType', 'Fuso',
-                'plateNumber', 'B 9123 KZN',
-                'tripDate', '17 Okt 2025',
-                'manifests', JSON_ARRAY(
-                    JSON_OBJECT(
-                        'id', 'MF001',
-                        'city', 'Medan',
-                        'manifestCode', 'MF-MDN-001',
-                        'stts', JSON_ARRAY(
-                            JSON_OBJECT(
-                                'sttNumber', 'STT20251105',
-                                'recipientName', 'Ahmad Sudrajat',
-                                'recipientAddress', 'Jl. Merdeka No. 123, Medan',
-                                'kolis', JSON_ARRAY(
-                                    JSON_OBJECT(
-                                        'id', 'STT20251105-1',
-                                        'weight', 2.5,
-                                        'dimensions', '30x20x15 cm'
-                                    )
-                                ),
-                                'estimatedDelivery', '19 Okt 2025',
-                                'lastLocation', 'Jl. Gatot Subroto, Jakarta',
-                                'lastCity', 'Jakarta',
-                                'lastUpdate', '15 Okt 2025, 14:30'
-                            )
-                        ),
-                        'lastLocation', 'Jl. Gatot Subroto, Jakarta',
-                        'lastCity', 'Jakarta',
-                        'lastUpdate', '15 Okt 2025, 14:30'
-                    )
-                )
-            )
-        ),
-        'pagination', JSON_OBJECT(
-            'page', p_page,
-            'limit', p_limit,
-            'total', 45,
-            'totalPages', 3
-        )
-    ) as json;
-END//
+DELIMITER ;
+
 
 -- SP: Customer Order Tracking
 DROP PROCEDURE IF EXISTS sp_customer_order_tracking_json//

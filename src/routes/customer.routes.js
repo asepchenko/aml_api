@@ -28,13 +28,15 @@ router.get(
 /**
  * GET /api/customer/orders
  * Mendapatkan daftar order customer dengan tracking location
- * SP: sp_customer_orders_json(p_user_id, p_status, p_page, p_limit)
+ * SP: sp_customer_orders_json(p_user_id, p_status, p_start_date, p_end_date, p_page, p_limit)
  */
 router.get(
   '/orders',
   authRequired,
   [
-    query('status').optional().isIn(['pending', 'in_progress', 'completed']),
+    query('status').optional().isIn(['On Process Delivery', 'Delivered']),
+    query('start_date').optional().isString(),
+    query('end_date').optional().isString(),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 })
   ],
@@ -46,10 +48,12 @@ router.get(
 
     const userId = req.user.sub;
     const status = req.query.status || null;
+    const startDate = req.query.start_date || null;
+    const endDate = req.query.end_date || null;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const data = await callJsonSP('sp_customer_orders_json', [userId, status, page, limit]);
+    const data = await callJsonSP('sp_customer_orders_json', [userId, status, startDate, endDate, page, limit]);
     if (!data) return notFound(res, 'Data orders tidak ditemukan', MOD);
     return ok(res, data, 'Daftar order berhasil diambil', MOD);
   })

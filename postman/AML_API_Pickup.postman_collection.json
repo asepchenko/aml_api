@@ -342,20 +342,31 @@
             {
               "key": "status",
               "value": "in_progress",
-              "description": "Filter: pending, in_progress, completed",
-              "disabled": true
+              "description": "Filter status: pending | in_progress | completed"
+            },
+            {
+              "key": "start_date",
+              "value": "2025-01-01",
+              "description": "Filter dari tanggal (YYYY-MM-DD). Opsional."
+            },
+            {
+              "key": "end_date",
+              "value": "2025-02-04",
+              "description": "Filter sampai tanggal (YYYY-MM-DD). Opsional."
             },
             {
               "key": "page",
-              "value": "1"
+              "value": "1",
+              "description": "Halaman (default: 1)"
             },
             {
               "key": "limit",
-              "value": "20"
+              "value": "20",
+              "description": "Jumlah per halaman 1-100 (default: 20)"
             }
           ]
         },
-        "description": "Mendapatkan daftar orders customer. Memanggil sp_customer_orders_json."
+        "description": "GET /api/customer/orders — Daftar orders customer (auth: Bearer token). Query: status, start_date, end_date, page, limit. SP: sp_customer_orders_json."
       },
       "response": []
     }
