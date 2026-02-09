@@ -60,14 +60,14 @@ router.get(
 );
 
 /**
- * GET /api/customer/orders/:tripId/tracking
- * Mendapatkan detail tracking untuk trip tertentu
- * SP: sp_customer_order_tracking_json(p_user_id, p_trip_id)
+ * GET /api/customer/orders/:sttNumber/tracking
+ * Mendapatkan detail tracking untuk sttNumber tertentu
+ * SP: sp_customer_order_tracking_json(p_user_id, p_sttnumber)
  */
 router.get(
-  '/orders/:tripId/tracking',
+  '/orders/:sttNumber/tracking',
   authRequired,
-  [param('tripId').isString().notEmpty()],
+  [param('sttNumber').isString().notEmpty()],
   asyncRoute(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -75,13 +75,15 @@ router.get(
     }
 
     const userId = req.user.sub;
-    const { tripId } = req.params;
+    const { sttNumber } = req.params;
 
-    const data = await callJsonSP('sp_customer_order_tracking_json', [userId, tripId]);
+    const data = await callJsonSP('sp_customer_order_tracking_json', [userId, sttNumber]);
     if (!data) return notFound(res, 'Data tracking tidak ditemukan', MOD);
     return ok(res, data, 'Detail tracking berhasil diambil', MOD);
   })
 );
+
+
 
 /**
  * POST /api/customer/pickup
@@ -154,7 +156,7 @@ router.get(
   '/pickup/history',
   authRequired,
   [
-    query('status').optional().isIn(['pending', 'accept', 'done', 'canceled']),
+    query('status').optional().isIn(['waiting', 'accept', 'done', 'canceled']),
     query('start_date').optional().isString(),
     query('end_date').optional().isString(),
     query('page').optional().isInt({ min: 1 }),
