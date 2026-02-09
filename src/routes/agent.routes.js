@@ -24,6 +24,24 @@ router.get(
 );
 
 /**
+ * GET /api/agent/profile
+ * Mendapatkan profil agent
+ * SP: sp_agent_profile_get_json(p_user_id)
+ */
+router.get(
+  '/profile',
+  authRequired,
+  asyncRoute(async (req, res) => {
+    // const userId = req.user.sub;
+    // const data = await callJsonSP('sp_customer_profile_get_json', [userId]);
+    const email = req.user.email;
+    const data = await callJsonSP('sp_agent_profile_get_json', [email]);
+    if (!data) return notFound(res, 'Profil tidak ditemukan', MOD);
+    return ok(res, data, 'Profil agent berhasil diambil', MOD);
+  })
+);
+
+/**
  * GET /api/agent/orders
  * Mendapatkan daftar tasks untuk agent
  * SP: sp_agent_tasks_json(p_user_id, p_type, p_status, p_priority, p_page, p_limit)

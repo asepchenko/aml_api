@@ -536,6 +536,47 @@ router.post(
 );
 
 /**
+ * POST /api/driver/scan/stt/unhold
+ * Unhold STT aktif dengan alasan
+ * SP: sp_driver_stt_unhold_json(p_user_id, p_trip_id, p_stt_number, p_reason)
+ */
+router.post(
+  '/scan/stt/unhold',
+  authRequired,
+  [
+    body('trip_id').isString().notEmpty().withMessage('trip_id wajib diisi'),
+    body('stt_number').isString().notEmpty().withMessage('stt_number wajib diisi'),
+    body('reason').isString().notEmpty().withMessage('reason wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { trip_id, stt_number, reason } = req.body;
+    try {
+      const data = await callJsonSP('sp_driver_stt_unhold_json', [userId, trip_id, stt_number, reason]);
+    
+
+    if (data.error === 'not_found') {
+      return bad(res, `STT ${stt_number} tidak ditemukan`, 400, MOD, SPECIFIC.NOT_FOUND);
+    }
+
+    if (data.error === 'already_unhold') {
+      return bad(res, `STT ${stt_number} sudah pernah di-unhold sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+    }
+    // if (!data) return bad(res, 'Gagal hold STT', 400, MOD, SPECIFIC.INVALID);
+    return ok(res, data, `STT ${stt_number} telah di-unhold.`, MOD);
+  } catch (err) {
+    console.error('[UNHOLD STT ERROR]', err);
+    return bad(res, 'Gagal unhold STT', 500, MOD, SPECIFIC.ERROR);
+  }
+  })
+);
+
+/**
  * POST /api/driver/location/update
  * Update location untuk trip
  * SP: sp_driver_location_update_json(p_user_id, p_trip_id, p_latitude, p_longitude)
