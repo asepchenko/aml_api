@@ -579,19 +579,20 @@ router.post(
 /**
  * POST /api/driver/location/update
  * Update location untuk trip
- * SP: sp_driver_location_update_json(p_user_id, p_trip_id, p_latitude, p_longitude)
+ * SP: sp_driver_location_update_json(p_user_id, sttNumber, p_latitude, p_longitude)
  */
 router.post(
   '/location/update',
   authRequired,
   [
-    body('trip_id').isString().notEmpty().withMessage('trip_id wajib diisi'),
+    body('sttNumber').isString().notEmpty().withMessage('Stt Number wajib diisi'),
     body('latitude').isFloat().withMessage('latitude wajib berupa angka'),
     body('longitude').isFloat().withMessage('longitude wajib berupa angka'),
     body('address').isString().notEmpty().withMessage('address wajib diisi'),
     body('city').isString().notEmpty().withMessage('city wajib diisi'),
     body('region').isString().notEmpty().withMessage('region wajib diisi'),
-    body('timestamp').isString().notEmpty().withMessage('timestamp wajib diisi')
+    body('timestamp').isString().notEmpty().withMessage('timestamp wajib diisi'),
+    body('action_type').isString().notEmpty().withMessage('action_type wajib diisi')
   ],
   asyncRoute(async (req, res) => {
     const errors = validationResult(req);
@@ -600,17 +601,18 @@ router.post(
     }
 
     const userId = req.user.sub;
-    const { trip_id, latitude, longitude, address, city, region, timestamp } = req.body;
+    const { sttNumber, latitude, longitude, address, city, region, timestamp, action_type } = req.body;
     try{
       const data = await callJsonSP('sp_driver_location_update_json', [
         userId, 
-        trip_id, 
+        sttNumber, 
         latitude, 
         longitude,
         address,
         city,
         region,
-        timestamp
+        timestamp,
+        action_type
       ]);
       if (data.error === 'not_found') {
         return bad(res, `Data Trip ${trip_id} tidak ditemukan`, 400, MOD, SPECIFIC.NOT_FOUND);
