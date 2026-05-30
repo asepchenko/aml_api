@@ -1,0 +1,566 @@
+{
+  "info": {
+    "_postman_id": "a8f3c2e1-4b5d-6e7f-9a0b-1c2d3e4f5a6b",
+    "name": "AML API - Driver",
+    "description": "Collection driver app: dashboard, pickup request, delivery DPL (dooring), pickup retur.\n\nImport ke Bruno: Collection → Import → Postman Collection.\n\nUrutan test disarankan:\n1. Login Driver\n2. Dashboard\n3. Delivery / Pickup Retur (list → detail → action status)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driver_username",
+      "value": "driver1",
+      "type": "string"
+    },
+    {
+      "key": "driver_password",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "pickup_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dpl_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pickup_retur_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "order_number",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "stt_number",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "koli_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "0. Auth",
+      "item": [
+        {
+          "name": "Login Driver (run first)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Login OK', () => pm.expect(json.success).to.be.true);",
+                  "if (json.data && json.data.token) {",
+                  "  pm.collectionVariables.set('token', json.data.token);",
+                  "  console.log('Token saved');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{driver_username}}\",\n  \"password\": \"{{driver_password}}\",\n  \"platform\": \"android\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "POST /api/auth/login — JWT sub = driver/user id untuk SP."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "dashboard"]
+            },
+            "description": "SP: sp_driver_dashboard_json(p_user_id)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Pickup Request",
+      "item": [
+        {
+          "name": "List Pickup Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.pickups && json.data.pickups[0]) {",
+                  "  const p = json.data.pickups[0];",
+                  "  pm.collectionVariables.set('pickup_id', p.id || p.code || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/pickup?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "accept",
+                  "description": "pending | accept | done",
+                  "disabled": true
+                },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "SP: sp_driver_pickup_list_json"
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Pickup Request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/pickup/{{pickup_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup", "{{pickup_id}}"]
+            },
+            "description": "SP: sp_driver_pickup_detail_json — id atau request_number"
+          },
+          "response": []
+        },
+        {
+          "name": "Accept Pickup Request",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/pickup/{{pickup_id}}/accept",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup", "{{pickup_id}}", "accept"]
+            },
+            "description": "SP: sp_driver_pickup_accept_json — pending → accept"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Pickup Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"done\",\n  \"eta\": \"14:00\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup/{{pickup_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup", "{{pickup_id}}", "status"]
+            },
+            "description": "SP: sp_driver_pickup_status_update_json"
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm Pickup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed_koli\": 2,\n  \"driver_name\": \"Driver Test\",\n  \"photo\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup/{{pickup_id}}/confirm",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup", "{{pickup_id}}", "confirm"]
+            },
+            "description": "SP: sp_driver_pickup_confirm_json"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Delivery DPL (Dooring)",
+      "item": [
+        {
+          "name": "List Delivery DPL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.deliveries && json.data.deliveries[0]) {",
+                  "  const d = json.data.deliveries[0];",
+                  "  pm.collectionVariables.set('dpl_id', d.id || d.code || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/delivery?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "Open",
+                  "description": "Open | On Process Delivery | Delivered | Received",
+                  "disabled": true
+                },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "SP: sp_driver_delivery_list_json\n\nDefault: aktif (bukan Delivered/Received), 30 hari."
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Delivery DPL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.items && json.data.items[0]) {",
+                  "  pm.collectionVariables.set('order_number', json.data.items[0].order_number || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/delivery/{{dpl_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery", "{{dpl_id}}"]
+            },
+            "description": "SP: sp_driver_delivery_detail_json\n\nResponse: delivery.next_action = start_process | deliver_items"
+          },
+          "response": []
+        },
+        {
+          "name": "Start Process (Open → On Process Delivery)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/delivery/{{dpl_id}}/start-process",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery", "{{dpl_id}}", "start-process"]
+            },
+            "description": "SP: sp_driver_delivery_start_process_json"
+          },
+          "response": []
+        },
+        {
+          "name": "Deliver Item (per STT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipient\": \"Budi Santoso\",\n  \"description\": \"Diterima lengkap\",\n  \"scan_code\": \"COLLY-001\",\n  \"scan_lat\": -6.2,\n  \"scan_lng\": 106.8,\n  \"scan_device\": \"android-driver\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/delivery/{{dpl_id}}/items/{{order_number}}/deliver",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery", "{{dpl_id}}", "items", "{{order_number}}", "deliver"]
+            },
+            "description": "SP: sp_driver_delivery_deliver_item_json\n\nWajib: recipient. Ulangi per STT sampai dpl_status = Delivered."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Pickup Retur",
+      "item": [
+        {
+          "name": "List Pickup Retur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.pickup_returs && json.data.pickup_returs[0]) {",
+                  "  const r = json.data.pickup_returs[0];",
+                  "  pm.collectionVariables.set('pickup_retur_id', r.id || r.code || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "assigned",
+                  "description": "draft | assigned | on_trip | arrived | cancelled",
+                  "disabled": true
+                },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "SP: sp_driver_pickup_retur_list_json"
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Pickup Retur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.items && json.data.items[0]) {",
+                  "  const item = json.data.items[0];",
+                  "  if (item.awb_no) pm.collectionVariables.set('stt_number', item.awb_no);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur/{{pickup_retur_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur", "{{pickup_retur_id}}"]
+            },
+            "description": "SP: sp_driver_pickup_retur_detail_json\n\nnext_action: start_trip | arrived"
+          },
+          "response": []
+        },
+        {
+          "name": "Scan Pickup Koli (opsional sebelum start_trip)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sttNumber\": \"{{stt_number}}\",\n  \"koliId\": \"{{koli_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur/{{pickup_retur_id}}/scan/pickup",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur", "{{pickup_retur_id}}", "scan", "pickup"]
+            },
+            "description": "SP: sp_driver_pickup_retur_scan_koli_json (phase=pickup)\n\nOpsional. Jika dilakukan, maka sebelum arrived wajib scan arrived."
+          },
+          "response": []
+        },
+        {
+          "name": "Status — Start Trip (assigned → on_trip)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"start_trip\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur/{{pickup_retur_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur", "{{pickup_retur_id}}", "status"]
+            },
+            "description": "SP: sp_driver_pickup_retur_status_json\n\nInsert order_trackings: On Process Delivery"
+          },
+          "response": []
+        },
+        {
+          "name": "Scan Arrived Koli (wajib jika ada scan pickup)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sttNumber\": \"{{stt_number}}\",\n  \"koliId\": \"{{koli_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur/{{pickup_retur_id}}/scan/arrived",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur", "{{pickup_retur_id}}", "scan", "arrived"]
+            },
+            "description": "SP: sp_driver_pickup_retur_scan_koli_json (phase=arrived)"
+          },
+          "response": []
+        },
+        {
+          "name": "Status — Arrived (on_trip → arrived)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"arrived\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/pickup-retur/{{pickup_retur_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "pickup-retur", "{{pickup_retur_id}}", "status"]
+            },
+            "description": "SP: sp_driver_pickup_retur_status_json\n\nInsert order_trackings: Transit (kota cabang HO)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Manifest & Trip (existing)",
+      "item": [
+        {
+          "name": "List Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/packages?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "packages"],
+              "query": [
+                { "key": "status", "value": "in_progress", "disabled": true },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Orders / Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/orders?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "orders"],
+              "query": [
+                { "key": "status", "value": "all" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/profile",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "profile"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -104,6 +104,356 @@ router.get(
   })
 );
 
+/* ===================== Delivery Packing List (DPL / dooring) ===================== */
+
+/**
+ * GET /api/driver/delivery
+ * Daftar DPL untuk driver
+ * SP: sp_driver_delivery_list_json(p_user_id, p_status, p_page, p_limit)
+ */
+router.get(
+  '/delivery',
+  authRequired,
+  [
+    query('status').optional().isIn(['Open', 'On Process Delivery', 'Delivered', 'Received']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 100 })
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const status = req.query.status || null;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+
+    const data = await callJsonSP('sp_driver_delivery_list_json', [userId, status, page, limit]);
+    if (!data) return notFound(res, 'Data delivery tidak ditemukan', MOD);
+    return ok(res, data, 'Daftar delivery berhasil diambil', MOD);
+  })
+);
+
+/**
+ * GET /api/driver/delivery/:id
+ * Detail DPL + items (id numerik atau packing_list_number)
+ * SP: sp_driver_delivery_detail_json(p_user_id, p_dpl_key)
+ */
+router.get(
+  '/delivery/:id',
+  authRequired,
+  [param('id').isString().notEmpty()],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const data = await callJsonSP('sp_driver_delivery_detail_json', [userId, id]);
+    if (!data) return notFound(res, 'Data delivery tidak ditemukan', MOD);
+    if (data.error === 'not_found') return notFound(res, data.message || 'Delivery tidak ditemukan', MOD);
+    return ok(res, data, 'Detail delivery berhasil diambil', MOD);
+  })
+);
+
+/**
+ * PUT /api/driver/delivery/:id/start-process
+ * DPL: Open -> On Process Delivery
+ * SP: sp_driver_delivery_start_process_json(p_user_id, p_dpl_key)
+ */
+router.put(
+  '/delivery/:id/start-process',
+  authRequired,
+  [param('id').isString().notEmpty()],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const data = await callJsonSP('sp_driver_delivery_start_process_json', [userId, id]);
+    if (!data) return bad(res, 'Gagal memulai proses delivery', 400, MOD, SPECIFIC.INVALID);
+    if (data.error) return bad(res, data.message || 'Gagal memulai proses delivery', 400, MOD, SPECIFIC.INVALID);
+    return ok(res, data, 'Proses delivery dimulai', MOD);
+  })
+);
+
+/**
+ * POST /api/driver/delivery/:id/scan/koli
+ * Scan koli per STT dalam DPL (status DPL harus On Process Delivery)
+ * SP: sp_driver_delivery_scan_koli_json(p_user_id, p_dpl_key, p_stt_number, p_koli_id)
+ */
+router.post(
+  '/delivery/:id/scan/koli',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const { sttNumber, koliId } = req.body;
+
+    const data = await callJsonSP('sp_driver_delivery_scan_koli_json', [userId, id, sttNumber, koliId]);
+    if (!data) return notFound(res, 'Data delivery tidak ditemukan', MOD);
+
+    if (data.error === 'not_found') {
+      return bad(res, `Koli ${koliId} tidak ditemukan di STT ${sttNumber}`, 400, MOD, SPECIFIC.NOT_FOUND);
+    }
+
+    if (data.error === 'already_scanned') {
+      return bad(res, `Koli ${koliId} sudah pernah di-scan sebelumnya`, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'invalid_status') {
+      return bad(res, 'Status DPL harus On Process Delivery untuk scan koli', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'missing_table') {
+      return bad(res, `Tabel ${data.table || '-'} belum tersedia di database`, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'driver_not_found') {
+      return bad(res, 'Data driver tidak ditemukan untuk user login', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'sql_error') {
+      return bad(res, 'Terjadi kesalahan saat memproses scan koli delivery', 400, MOD, SPECIFIC.ERROR);
+    }
+
+    if (data.error) {
+      return bad(res, 'Gagal scan koli delivery', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const message = `Koli ${koliId} berhasil di-scan. (${data.scannedCount}/${data.totalCount} koli)`;
+    return ok(res, data, message, MOD);
+  })
+);
+
+/**
+ * POST /api/driver/delivery/:id/items/:orderNumber/deliver
+ * DPL: realisasi deliver per STT (On Process Delivery -> item Delivered; DPL Delivered jika semua selesai)
+ * SP: sp_driver_delivery_deliver_item_json(..., p_photo_base64, ...)
+ */
+router.post(
+  '/delivery/:id/items/:orderNumber/deliver',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    param('orderNumber').isString().notEmpty(),
+    body('recipient').isString().notEmpty().withMessage('recipient wajib diisi'),
+    body('description').optional().isString(),
+    body('photo_base64').optional().isString(),
+    body('scan_code').optional().isString(),
+    body('scan_lat').optional().isFloat(),
+    body('scan_lng').optional().isFloat(),
+    body('scan_device').optional().isString()
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id, orderNumber } = req.params;
+    const {
+      recipient,
+      description = null,
+      photo_base64 = null,
+      scan_code = null,
+      scan_lat = null,
+      scan_lng = null,
+      scan_device = null
+    } = req.body;
+
+    const data = await callJsonSP('sp_driver_delivery_deliver_item_json', [
+      userId,
+      id,
+      orderNumber,
+      recipient,
+      description,
+      photo_base64,
+      scan_code,
+      scan_lat,
+      scan_lng,
+      scan_device
+    ]);
+
+    if (!data) return bad(res, 'Gagal deliver item', 400, MOD, SPECIFIC.INVALID);
+    if (data.error) return bad(res, data.message || 'Gagal deliver item', 400, MOD, SPECIFIC.INVALID);
+    return ok(res, data, 'Item berhasil di-deliver', MOD);
+  })
+);
+
+/* ===================== Pickup Retur ===================== */
+
+/**
+ * GET /api/driver/pickup-retur
+ * Daftar pickup retur untuk driver
+ * SP: sp_driver_pickup_retur_list_json(p_user_id, p_status, p_page, p_limit)
+ */
+router.get(
+  '/pickup-retur',
+  authRequired,
+  [
+    query('status').optional().isIn(['draft', 'assigned', 'on_trip', 'arrived', 'cancelled']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 100 })
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const status = req.query.status || null;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+
+    const data = await callJsonSP('sp_driver_pickup_retur_list_json', [userId, status, page, limit]);
+    if (!data) return notFound(res, 'Data pickup retur tidak ditemukan', MOD);
+    return ok(res, data, 'Daftar pickup retur berhasil diambil', MOD);
+  })
+);
+
+/**
+ * GET /api/driver/pickup-retur/:id
+ * Detail pickup retur + STT
+ * SP: sp_driver_pickup_retur_detail_json(p_user_id, p_retur_key)
+ */
+router.get(
+  '/pickup-retur/:id',
+  authRequired,
+  [param('id').isString().notEmpty()],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const data = await callJsonSP('sp_driver_pickup_retur_detail_json', [userId, id]);
+    if (!data) return notFound(res, 'Data pickup retur tidak ditemukan', MOD);
+    if (data.error === 'not_found') return notFound(res, data.message || 'Pickup retur tidak ditemukan', MOD);
+    return ok(res, data, 'Detail pickup retur berhasil diambil', MOD);
+  })
+);
+
+/**
+ * PUT /api/driver/pickup-retur/:id/status
+ * Pickup retur: assigned -> on_trip -> arrived
+ * SP: sp_driver_pickup_retur_status_json(p_user_id, p_retur_key, p_action)
+ */
+router.put(
+  '/pickup-retur/:id/status',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    body('action').isIn(['start_trip', 'arrived']).withMessage('action harus start_trip atau arrived')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const { action } = req.body;
+
+    const data = await callJsonSP('sp_driver_pickup_retur_status_json', [userId, id, action]);
+    if (!data) return bad(res, 'Gagal update status pickup retur', 400, MOD, SPECIFIC.INVALID);
+    if (data.error) return bad(res, data.message || 'Gagal update status pickup retur', 400, MOD, SPECIFIC.INVALID);
+    return ok(res, data, 'Status pickup retur berhasil diupdate', MOD);
+  })
+);
+
+/**
+ * POST /api/driver/pickup-retur/:id/scan/pickup
+ * Scan koli saat ambil barang dari agent (opsional, sebelum start_trip)
+ * SP: sp_driver_pickup_retur_scan_koli_json(p_user_id, p_retur_key, p_scan_phase, p_stt_number, p_koli_id)
+ */
+router.post(
+  '/pickup-retur/:id/scan/pickup',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const { sttNumber, koliId } = req.body;
+
+    const data = await callJsonSP('sp_driver_pickup_retur_scan_koli_json', [userId, id, 'pickup', sttNumber, koliId]);
+    if (!data) return bad(res, 'Gagal scan pickup retur', 400, MOD, SPECIFIC.INVALID);
+    if (data.error === 'not_found') return notFound(res, data.message || 'Pickup retur / STT / koli tidak ditemukan', MOD);
+    if (data.error === 'already_scanned') return bad(res, `Koli ${koliId} sudah pernah di-scan pickup`, 400, MOD, SPECIFIC.INVALID);
+    if (data.error === 'invalid_status') return bad(res, data.message || 'Status tidak valid untuk scan pickup', 400, MOD, SPECIFIC.INVALID);
+    if (data.error) return bad(res, data.message || 'Gagal scan pickup retur', 400, MOD, SPECIFIC.INVALID);
+
+    return ok(res, data, `Scan pickup koli ${koliId} berhasil (${data.scannedCount}/${data.totalCount})`, MOD);
+  })
+);
+
+/**
+ * POST /api/driver/pickup-retur/:id/scan/arrived
+ * Scan koli saat akan arrived (wajib jika sebelumnya ada scan pickup)
+ * SP: sp_driver_pickup_retur_scan_koli_json(p_user_id, p_retur_key, p_scan_phase, p_stt_number, p_koli_id)
+ */
+router.post(
+  '/pickup-retur/:id/scan/arrived',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    body('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi'),
+    body('koliId').isString().notEmpty().withMessage('koliId wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id } = req.params;
+    const { sttNumber, koliId } = req.body;
+
+    const data = await callJsonSP('sp_driver_pickup_retur_scan_koli_json', [userId, id, 'arrived', sttNumber, koliId]);
+    if (!data) return bad(res, 'Gagal scan arrived pickup retur', 400, MOD, SPECIFIC.INVALID);
+    if (data.error === 'not_found') return notFound(res, data.message || 'Pickup retur / STT / koli tidak ditemukan', MOD);
+    if (data.error === 'already_scanned') return bad(res, `Koli ${koliId} sudah pernah di-scan arrived`, 400, MOD, SPECIFIC.INVALID);
+    if (data.error === 'invalid_status') return bad(res, data.message || 'Status tidak valid untuk scan arrived', 400, MOD, SPECIFIC.INVALID);
+    if (data.error) return bad(res, data.message || 'Gagal scan arrived pickup retur', 400, MOD, SPECIFIC.INVALID);
+
+    return ok(res, data, `Scan arrived koli ${koliId} berhasil (${data.scannedCount}/${data.totalCount})`, MOD);
+  })
+);
+
+/* ===================== Pickup Request (legacy) ===================== */
+
 /**
  * GET /api/driver/pickup/:id
  * Mendapatkan detail pickup berdasarkan ID
@@ -196,6 +546,7 @@ router.put(
       return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
     }
 
+    const userId = req.user.sub;
     const email = req.user.email;
     const { id } = req.params;
     const { status, eta } = req.body;
