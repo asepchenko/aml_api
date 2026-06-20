@@ -19,7 +19,7 @@ Folder ini berisi **Postman Collection v2.1** yang bisa di-import ke **Bruno** a
 
 1. **0. Auth → Login Driver** (simpan `token` otomatis)
 2. **1. Dashboard**
-3. **3. Delivery DPL**: List → Detail → Start Process → Deliver Item
+3. **3. Delivery DPL**: List → Detail → Start Process → **List Koli STT** → **Scan Koli** (ulangi) → Deliver Item
 4. **4. Pickup Retur**: List → Detail → Start Trip → Arrived
 
 ## Variable collection (Driver)
@@ -32,7 +32,10 @@ Folder ini berisi **Postman Collection v2.1** yang bisa di-import ke **Bruno** a
 | `driver_password` | `password123` | Sesuaikan DB |
 | `dpl_id` | *(auto dari list)* | Id atau `packing_list_number` |
 | `pickup_retur_id` | *(auto dari list)* | Id atau `retur_number` |
-| `order_number` | *(auto dari detail DPL)* | STT untuk deliver item |
+| `order_number` | *(auto dari detail DPL)* | Order number untuk deliver item |
+| `stt_number` | *(auto dari detail DPL)* | AWB / STT untuk list & scan koli |
+| `koli_id` | *(auto dari list koli)* | Barcode koli untuk scan |
+| `photo_base64` | *(sample 1x1 PNG)* | Raw base64 foto bukti deliver; ganti saat uji nyata |
 
 ## Deploy SP (manual — DB sering live)
 

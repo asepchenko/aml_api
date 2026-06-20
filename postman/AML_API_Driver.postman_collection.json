@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a8f3c2e1-4b5d-6e7f-9a0b-1c2d3e4f5a6b",
     "name": "AML API - Driver",
-    "description": "Collection driver app: dashboard, pickup request, delivery DPL (dooring), pickup retur.\n\nImport ke Bruno: Collection → Import → Postman Collection.\n\nUrutan test disarankan:\n1. Login Driver\n2. Dashboard\n3. Delivery / Pickup Retur (list → detail → action status)",
+    "description": "Collection driver app: dashboard, pickup request, delivery DPL (dooring), pickup retur.\n\nImport ke Bruno: Collection → Import → Postman Collection.\n\nUrutan test disarankan:\n1. Login Driver\n2. Dashboard\n3. Delivery DPL: list → detail → start process → list koli → scan koli → deliver item\n4. Pickup Retur: list → detail → action status",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -55,6 +55,12 @@
       "key": "koli_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "photo_base64",
+      "value": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "type": "string",
+      "description": "Sample 1x1 PNG (raw base64, tanpa data:image prefix). Ganti dengan foto deliver asli saat uji."
     }
   ],
   "auth": {
@@ -295,7 +301,11 @@
                 "exec": [
                   "const json = pm.response.json();",
                   "if (json.data && json.data.items && json.data.items[0]) {",
-                  "  pm.collectionVariables.set('order_number', json.data.items[0].order_number || '');",
+                  "  const item = json.data.items[0];",
+                  "  pm.collectionVariables.set('order_number', item.order_number || '');",
+                  "  if (item.awb_no && item.awb_no !== '-') {",
+                  "    pm.collectionVariables.set('stt_number', item.awb_no);",
+                  "  }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -329,6 +339,56 @@
           "response": []
         },
         {
+          "name": "List Koli STT (DPL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.kolis && json.data.kolis[0]) {",
+                  "  const k = json.data.kolis.find(x => !x.isScanned) || json.data.kolis[0];",
+                  "  if (k && k.koliId) pm.collectionVariables.set('koli_id', k.koliId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/delivery/{{dpl_id}}/stts/{{stt_number}}/kolis",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery", "{{dpl_id}}", "stts", "{{stt_number}}", "kolis"]
+            },
+            "description": "SP: sp_driver_delivery_stt_kolis_json\n\nWajib: DPL status On Process Delivery. stt_number = awb_no dari detail DPL.\n\nResponse: kolis[], scannedCount, totalCount, allScanned"
+          },
+          "response": []
+        },
+        {
+          "name": "Scan Koli (DPL)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sttNumber\": \"{{stt_number}}\",\n  \"koliId\": \"{{koli_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/delivery/{{dpl_id}}/scan/koli",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "delivery", "{{dpl_id}}", "scan", "koli"]
+            },
+            "description": "SP: sp_driver_delivery_scan_koli_json\n\nUlangi scan per koli sampai allScanned=true, lalu Deliver Item."
+          },
+          "response": []
+        },
+        {
           "name": "Deliver Item (per STT)",
           "request": {
             "method": "POST",
@@ -337,7 +397,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipient\": \"Budi Santoso\",\n  \"description\": \"Diterima lengkap\",\n  \"scan_code\": \"COLLY-001\",\n  \"scan_lat\": -6.2,\n  \"scan_lng\": 106.8,\n  \"scan_device\": \"android-driver\"\n}",
+              "raw": "{\n  \"recipient\": \"Budi Santoso\",\n  \"description\": \"Diterima lengkap\",\n  \"photo_base64\": \"{{photo_base64}}\",\n  \"scan_code\": \"{{koli_id}}\",\n  \"scan_lat\": -6.2,\n  \"scan_lng\": 106.8,\n  \"scan_device\": \"android-driver\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -345,7 +405,7 @@
               "host": ["{{base_url}}"],
               "path": ["driver", "delivery", "{{dpl_id}}", "items", "{{order_number}}", "deliver"]
             },
-            "description": "SP: sp_driver_delivery_deliver_item_json\n\nWajib: recipient. Ulangi per STT sampai dpl_status = Delivered."
+            "description": "SP: sp_driver_delivery_deliver_item_json\n\nWajib: recipient. Opsional: photo_base64 (raw base64), description, scan_code/lat/lng/device.\n\nUlangi per STT (setelah scan koli lengkap) sampai dpl_status = Delivered."
           },
           "response": []
         }

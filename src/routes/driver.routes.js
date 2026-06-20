@@ -185,6 +185,62 @@ router.put(
 );
 
 /**
+ * GET /api/driver/delivery/:id/stts/:sttNumber/kolis
+ * Daftar koli STT dalam DPL untuk layar scan (status DPL harus On Process Delivery)
+ * SP: sp_driver_delivery_stt_kolis_json(p_user_id, p_dpl_key, p_stt_number)
+ */
+router.get(
+  '/delivery/:id/stts/:sttNumber/kolis',
+  authRequired,
+  [
+    param('id').isString().notEmpty(),
+    param('sttNumber').isString().notEmpty().withMessage('sttNumber wajib diisi')
+  ],
+  asyncRoute(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return bad(res, errors.array()[0].msg, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    const userId = req.user.sub;
+    const { id, sttNumber } = req.params;
+
+    const data = await callJsonSP('sp_driver_delivery_stt_kolis_json', [userId, id, sttNumber]);
+    if (!data) return notFound(res, 'Data delivery tidak ditemukan', MOD);
+
+    if (data.error === 'not_found') {
+      return notFound(res, data.message || 'Delivery / STT tidak ditemukan', MOD);
+    }
+
+    if (data.error === 'invalid_status') {
+      return bad(res, data.message || 'Status DPL harus On Process Delivery untuk scan koli', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'driver_not_found') {
+      return bad(res, 'Data driver tidak ditemukan untuk user login', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'missing_table') {
+      return bad(res, `Tabel ${data.table || '-'} belum tersedia di database`, 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'koli_not_ready') {
+      return bad(res, data.message || 'Data koli STT belum tersedia', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    if (data.error === 'sql_error') {
+      return bad(res, 'Terjadi kesalahan saat mengambil daftar koli delivery', 400, MOD, SPECIFIC.ERROR);
+    }
+
+    if (data.error) {
+      return bad(res, 'Gagal mengambil daftar koli delivery', 400, MOD, SPECIFIC.INVALID);
+    }
+
+    return ok(res, data, 'Daftar koli berhasil diambil', MOD);
+  })
+);
+
+/**
  * POST /api/driver/delivery/:id/scan/koli
  * Scan koli per STT dalam DPL (status DPL harus On Process Delivery)
  * SP: sp_driver_delivery_scan_koli_json(p_user_id, p_dpl_key, p_stt_number, p_koli_id)
