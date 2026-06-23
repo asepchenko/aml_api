@@ -363,7 +363,7 @@
               "host": ["{{base_url}}"],
               "path": ["driver", "delivery", "{{dpl_id}}", "stts", "{{stt_number}}", "kolis"]
             },
-            "description": "SP: sp_driver_delivery_stt_kolis_json\n\nWajib: DPL status On Process Delivery. stt_number = awb_no dari detail DPL.\n\nResponse: kolis[], scannedCount, totalCount, allScanned"
+            "description": "SP: sp_driver_delivery_stt_kolis_json\n\nstt_number = awb_no dari detail DPL. Tetap return data saat Delivered (view-only).\n\nResponse: kolis[], canScan, itemStatus, recipient, description, deliveryPhoto, dplStatus, scannedCount, totalCount, allScanned"
           },
           "response": []
         },

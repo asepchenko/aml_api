@@ -2,10 +2,12 @@
 -- Driver: daftar koli per STT dalam DPL (untuk layar scan sebelum POST scan/koli)
 -- Output:
 --   {
---     sttNumber, orderNumber, dplCode, dplStatus,
---     scannedCount, totalCount, allScanned,
+--     sttNumber, orderNumber, dplCode, dplStatus, itemStatus, deliveredAt,
+--     canScan, scannedCount, totalCount, allScanned,
+--     recipient, description, deliveryPhoto,
 --     kolis: [{ koliId, collyNo, isScanned, scannedAt }]
 --   }
+--   canScan=false jika DPL bukan On Process Delivery atau item sudah Delivered (view-only).
 --
 -- Deploy: delimiter // -> Execute ALL (manual di HeidiSQL)
 -- CALL sp_driver_delivery_stt_kolis_json('84', '34', 'AWB123');
@@ -28,7 +30,12 @@ COMMENT 'Driver list koli STT dalam DPL untuk scan delivery'
 proc: BEGIN
     DECLARE v_packing_list_number VARCHAR(20);
     DECLARE v_dpl_status VARCHAR(30);
+    DECLARE v_item_status VARCHAR(30);
+    DECLARE v_item_delivered_at DATETIME;
+    DECLARE v_delivered_recipient VARCHAR(100);
+    DECLARE v_delivered_note VARCHAR(255);
     DECLARE v_order_number VARCHAR(50);
+    DECLARE v_can_scan TINYINT(1) DEFAULT 0;
     DECLARE v_event_type VARCHAR(40) DEFAULT 'driver_delivery_scan';
     DECLARE v_event_scope_key VARCHAR(160);
     DECLARE v_total_koli INT DEFAULT 0;
@@ -89,17 +96,16 @@ proc: BEGIN
         LEAVE proc;
     END IF;
 
-    IF CONVERT(IFNULL(v_dpl_status, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
-        <> CONVERT('On Process Delivery' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN
-        SELECT JSON_OBJECT(
-            'error', 'invalid_status',
-            'message', 'Status DPL harus On Process Delivery untuk scan koli'
-        ) AS json;
-        LEAVE proc;
-    END IF;
-
-    SELECT o.order_number
-      INTO v_order_number
+    SELECT o.order_number,
+           IFNULL(det.item_status, 'Open'),
+           det.delivered_at,
+           det.delivered_recipient,
+           det.delivered_note
+      INTO v_order_number,
+           v_item_status,
+           v_item_delivered_at,
+           v_delivered_recipient,
+           v_delivered_note
     FROM delivery_packing_list_details det
     INNER JOIN orders o
         ON CONVERT(o.order_number USING utf8mb4) COLLATE utf8mb4_unicode_ci
@@ -150,11 +156,35 @@ proc: BEGIN
     SET v_all_scanned =
         IF(v_total_koli > 0 AND v_scanned_koli = v_total_koli, 1, 0);
 
+    SET v_can_scan = IF(
+        CONVERT(IFNULL(v_dpl_status, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('On Process Delivery' USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        AND CONVERT(IFNULL(v_item_status, 'Open') USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            <> CONVERT('Delivered' USING utf8mb4) COLLATE utf8mb4_unicode_ci,
+        1,
+        0
+    );
+
     SELECT JSON_OBJECT(
         'sttNumber', TRIM(p_stt_number),
         'orderNumber', v_order_number,
         'dplCode', v_packing_list_number,
         'dplStatus', v_dpl_status,
+        'itemStatus', v_item_status,
+        'deliveredAt', IFNULL(DATE_FORMAT(v_item_delivered_at, '%Y-%m-%d %H:%i:%s'), NULL),
+        'recipient', IFNULL(v_delivered_recipient, NULL),
+        'description', IFNULL(v_delivered_note, NULL),
+        'deliveryPhoto', (
+            SELECT COALESCE(ot.photo_base64, ot.filename)
+            FROM order_trackings ot
+            WHERE CONVERT(ot.order_number USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                = CONVERT(v_order_number USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              AND CONVERT(ot.status_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                = CONVERT('Delivered' USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            ORDER BY ot.status_date DESC, ot.id DESC
+            LIMIT 1
+        ),
+        'canScan', IF(v_can_scan = 1, TRUE, FALSE),
         'scannedCount', v_scanned_koli,
         'totalCount', v_total_koli,
         'allScanned', v_all_scanned,

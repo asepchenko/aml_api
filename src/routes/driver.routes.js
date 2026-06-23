@@ -186,7 +186,7 @@ router.put(
 
 /**
  * GET /api/driver/delivery/:id/stts/:sttNumber/kolis
- * Daftar koli STT dalam DPL untuk layar scan (status DPL harus On Process Delivery)
+ * Daftar koli STT dalam DPL (view allowed on Delivered; canScan=false blocks scan UI)
  * SP: sp_driver_delivery_stt_kolis_json(p_user_id, p_dpl_key, p_stt_number)
  */
 router.get(
@@ -210,10 +210,6 @@ router.get(
 
     if (data.error === 'not_found') {
       return notFound(res, data.message || 'Delivery / STT tidak ditemukan', MOD);
-    }
-
-    if (data.error === 'invalid_status') {
-      return bad(res, data.message || 'Status DPL harus On Process Delivery untuk scan koli', 400, MOD, SPECIFIC.INVALID);
     }
 
     if (data.error === 'driver_not_found') {
